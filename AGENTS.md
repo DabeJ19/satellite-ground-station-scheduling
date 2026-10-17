@@ -12,6 +12,10 @@
 4. 每個 sprint 的驗收測試寫在 SPEC §8；未通過不得宣告完成。
 5. 變更 SPEC 需在 DECISIONS.md 追加一行紀錄（日期 + 原因）。
 6. 時間一律為相對 `timeOrigin` 的整數分鐘，區間半開 `[start, end)`。
+7. 審查方（Codex）僅可在 `review/<sprint>` 新增該輪 `docs/reviews/<sprint>-codex.md`，不修改工程檔或 `main`。複審另用檔名 `<sprint>-codex-r2.md`，既有 review 檔不得靜默重寫。
+8. 送審包與審查報告均記錄被審 commit SHA；工程方合併 review 前核對被審內容是否已改動，若有須列差異或重新送審，不得將舊 review 當作新版本通過。
+9. 工作開始先 `git fetch` 並確認分支／工作目錄狀態；不得覆蓋對方未提交變更、reset 他人分支或 force push。
+10. 工程方對每輪審查逐項回應於 `docs/reviews/<sprint>-response.md`（採納／不採納 + 理由），SPEC 修訂同步追加 DECISIONS.md。
 
 ## 審查請求格式
 見 `docs/REVIEW_REQUEST_TEMPLATE.md`。工程方在 sprint 結束時產出兩個檔案：

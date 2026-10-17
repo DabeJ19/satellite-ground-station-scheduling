@@ -15,4 +15,6 @@ node build.js        # 產生 dist/index.html
 雙擊 `dist/index.html` 即可使用。
 
 ## 授權
-專案程式碼：MIT。內嵌之 glpk.js 5.0.0 為 GPL-3.0（見 vendor/glpk/LICENSE）。
+- 本專案自有程式碼（`src/`、`build.js`、文件）：MIT。
+- `vendor/glpk/glpk-5.0.0.js`（jvail/glpk.js，GLPK 的 WebAssembly 移植）：**GPL-3.0**，見 `vendor/glpk/LICENSE`，來源 https://github.com/jvail/glpk.js 。
+- `dist/index.html` 內嵌了上述 glpk.js，因此整份單檔交付物受 GPL-3.0 約束，不是純 MIT；單檔內保留其版權與授權聲明，build 時的轉換僅為把 ES module export 改寫為全域變數（見 `build.js`）。
