@@ -1,6 +1,6 @@
 # Codex 複審 Prompt — S1-r2
 
-複審 S1。被審 commit `__SHA__`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S1-codex-r2.md`，不改其他檔。
+複審 S1。被審 commit `74e55da`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S1-codex-r2.md`，不改其他檔。
 
 讀：`docs/reviews/S1-response.md` → `src/engine.js` → `src/milp.js` → `src/ui.js` → `tests/engine.test.js` → `tests/browser.s1.js` → `SPEC.md` §4.2（已補結果有效性與預算規則）→ `DECISIONS.md` 末段。
 
