@@ -1,6 +1,6 @@
 # SPEC — 太空衛星地面站排程：最佳解（MILP）與基因演算法（GA）互動工具
 
-版本：S0 draft 3（2026-10-17）　狀態：已依 Codex S0 複審修訂（docs/reviews/S0-codex-r2.md）
+版本：S1 draft 4（2026-10-17）　狀態：S0 規格通過；依 Codex S1 審查（docs/reviews/S1-codex.md）補 §4.2 結果有效性與預算規則
 PO：James　工程：Claude Code　審查：Codex
 
 變更摘要（draft 1 → 2）：修正 §1.3 上界證明（B1）；明定等待基準與目標計算（B2）；新增資料驗證契約與候選集合定義（B3）；重寫超時 LP 上界／gap 規則（B4）；納入 S1–S7 建議；§9 開放問題全部結案。
@@ -144,8 +144,8 @@ GLPK 為浮點運算，回傳後一律重新以整數計算 `assigned`、`totalW
 S1 使用每分鐘列；記錄候選數、列數、非零係數數、建模與求解時間。後續僅在有實測收益時，以每資源所有候選占用區間的**起始事件**建立等價容量列，並與逐分鐘模型比對可行域及最佳 (Z, W)；不得只以 visibility 邊界或某一已選排程作事件點。
 
 ### 4.2 求解流程與狀態
-1. 在 Web Worker（glpk.js 自帶）呼叫 `solve(lp, { tmlim, presol: true })`。使用者秒數是 MILP 與額外 LP 共用的求解預算；分別記錄耗時；提供中斷／worker 終止。
-2. 解 → Schedule → `checkFeasible` 二次驗證 → `score` 重算整數 (assigned, totalWait) → 寫入 MILP 解槽。MILP 轉出的不可行結果視為錯誤，不當作解槽成果。
+1. 在 Web Worker（glpk.js 自帶）呼叫 `solve(lp, { tmlim, presol: true })`。使用者秒數是 MILP 與額外 LP 共用的求解預算：階段配額 MILP 80%／LP 20%（各至少 1 s 才啟動），並以單調時鐘 deadline 在 LP 啟動前重新扣除實際已用時間，LP 的 tmlim 不超過配額與實際剩餘兩者；分別記錄耗時；提供中斷／worker 終止。glpk.js 不回報停止原因，因此 `GLP_FEAS` 一律標「有可行解，未證明最佳」並附用時／上限資訊，不宣稱「超時」。
+2. 結果有效性（hasIncumbent）：只有 `GLP_OPT`／`GLP_FEAS` 才解碼；變數值須為有限且近似 0/1；解碼後 `checkFeasible` 通過；求解器 z 與重算 objective 一致（容差 1e−6）。任一不符 → 標「結果無效」、`schedule=null`、不寫解槽、不得保留「已證明最佳」。合法的全零 incumbent 與零候選的已證明空解仍允許。LP 鬆弛以獨立 try/catch 處理，失敗只影響 bound（顯示「上界／gap 尚未取得」），不丟棄已取得的 incumbent。
 3. 狀態標示：
    - `GLP_OPT` → 「已證明最佳」。
    - `GLP_FEAS` → 「有可行解，未證明最佳」，確知超時時加註「（超時）」。

@@ -22,6 +22,7 @@
 </header>
 
 <main>
+<div id="storageWarn" class="errors hidden">瀏覽器儲存不可用（localStorage 失敗）：本次操作只保存在記憶體，關閉頁面即遺失。請用「匯出 JSON」備份資料。</div>
   <!-- ===== 資料 ===== -->
   <section class="tab" id="tab-data">
     <div class="toolbar">
@@ -39,11 +40,11 @@
       <div class="card">
         <h3>基本參數</h3>
         <div class="form">
-          <label>名稱 <input data-meta="name" type="text"></label>
-          <label>時間原點 <input data-meta="timeOrigin" type="text" placeholder="10:00"></label>
-          <label>時間軸長度 H（分鐘） <input data-meta="horizonMin" type="number" min="1" step="1"></label>
-          <label>全域校準（分鐘） <input data-meta="calibDefaultMin" type="number" min="0" step="1"></label>
-          <label>頻段（逗號分隔） <input data-meta="bands" type="text" placeholder="S, X"></label>
+          <label>名稱 <input data-meta="name" data-path="meta.name" type="text"></label>
+          <label>時間原點 <input data-meta="timeOrigin" data-path="meta.timeOrigin" type="text" placeholder="10:00"></label>
+          <label>時間軸長度 H（分鐘） <input data-meta="horizonMin" data-path="meta.horizonMin" type="number" min="1" step="1"></label>
+          <label>全域校準（分鐘） <input data-meta="calibDefaultMin" data-path="meta.calibDefaultMin" type="number" min="0" step="1"></label>
+          <label>頻段（逗號分隔） <input data-meta="bands" data-path="bands" type="text" placeholder="S, X"></label>
         </div>
       </div>
       <div class="card">

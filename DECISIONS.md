@@ -80,3 +80,15 @@
 | 時間索引列裁剪 | 只含 ≤1 個變數的容量列不建（由 0..1 界隱含） | 等價且縮小模型；統計數字（rows）為裁剪後 |
 | 解槽保存 | 每個解槽保存其資料快照與 revision；版本不符時評分卡標「舊版本資料」，甘特圖以該快照繪製 | 符合 §4.2 閘門：舊結果不覆蓋，但仍可檢視 |
 | 單變數 LP 列 | 無候選（0 變數）時不呼叫 GLPK，直接回傳已證明最佳的空解 | §8.1 最後一列 |
+
+## 2026-10-17 S1 審查後修訂（Codex 退回 7 項 → S1-r2）
+| 項目 | 決定 | 原因 |
+|---|---|---|
+| 資料驗證 | validateData 先驗型別再遍歷，任何 JSON 值皆回 {ok,errors}；匯入在區域變數完成 parse→validate→normalize 後才取代 state；所有輸入值轉義 | B1：原本會 throw、先渲染後驗證、HTML 注入 |
+| 索引與鍵 | 所有 id 索引改 Map；(sat,station) 用巢狀 Map；違規去重鍵 JSON.stringify([rule, reqs]) | B2：原型鍵、逗號／NUL 碰撞 |
+| 結果有效性 | 新增 hasIncumbent 判定（§4.2 第 2 點）；LP 獨立 try/catch | B3 |
+| GLPK 實例 ownership | single-flight 初始化 + 世代號；cancel 只終止進行中 run 擁有的實例／未完成初始化；初始化後再驗 run 有效 | B4 |
+| 引用選單 | bands／衛星 id／站 id 變更時重建選單，失效引用保留並標「無效」；天線換站找不到目標報錯不移動 | B5 |
+| 時間預算 | 80/20 配額 + deadline 實際剩餘；不標「超時」 | B6 |
+| 測試 | browser 測試硬斷言、非零退出；UI 閘門以可注入 GLPK factory 測實際路徑 | B7 |
+| metadata 欄位定位、儲存失敗提示 | 採納 | A1、A2 |
