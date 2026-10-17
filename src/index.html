@@ -69,6 +69,10 @@
       </div>
     </div>
     <div class="card" style="margin-top:14px">
+      <h3>時窗時間軸 <span class="muted small">拖曳條的左右端改 start／end，拖曳中段整段平移；改完按「套用變更」</span></h3>
+      <canvas id="winEditor" height="200"></canvas>
+    </div>
+    <div class="card" style="margin-top:14px">
       <h3>隨機實例產生器（seeded，可重現）</h3>
       <div class="form gen">
         <label>seed <input data-gen="seed" type="number" min="0" step="1" value="1"></label>
@@ -168,11 +172,29 @@
     </div>
     <div class="cards3" id="scoreCards"></div>
     <div class="card">
-      <canvas id="gantt" height="320"></canvas>
-      <div id="ganttViol" class="errors hidden"></div>
-      <div class="legend" id="legend"></div>
+      <div class="playbar">
+        <button id="btnPlay" class="primary" title="播放／暫停">▶ 播放</button>
+        <label class="inline">倍速 <select id="playSpeed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label>
+        <input id="playScrub" type="range" min="0" max="100" step="0.1" value="0">
+        <span id="playTime" class="mono">10:00</span>
+        <label class="inline"><input type="checkbox" id="showResidual" checked> 顯示擬合殘差</label>
+        <button id="btnAnimPng" class="ghost">動畫幀 PNG</button>
+      </div>
+      <p class="muted small">1× = 每秒 1 分鐘；同一游標驅動動畫與甘特圖。</p>
     </div>
-    <div class="card"><h3>衛星繞地示意動畫</h3><p class="muted">S3 實作。</p></div>
+    <div class="grid2 sched">
+      <div class="card">
+        <h3>甘特圖 <span class="muted small">拖曳任務可換天線／改起始（自動複製到「手動」解槽）；拖到下方托盤 = 取消排入</span></h3>
+        <canvas id="gantt" height="320"></canvas>
+        <div id="ganttTray" class="tray"><span class="muted small">未排入需求：</span><span id="trayChips"></span></div>
+        <div id="ganttViol" class="errors hidden"></div>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="card">
+        <h3>衛星繞地示意動畫 <span class="muted small">軌道為示意，接觸狀態以輸入時窗為準</span></h3>
+        <canvas id="anim" height="420"></canvas>
+      </div>
+    </div>
   </section>
 </main>
 <footer class="muted small">build __BUILD_TIME__ · 內嵌 glpk.js 5.0.0（GPL-3.0，© jvail，https://github.com/jvail/glpk.js；build 僅將 ES module export 改寫為全域變數）· 自有程式碼 MIT · 離線可用、零外部請求</footer>

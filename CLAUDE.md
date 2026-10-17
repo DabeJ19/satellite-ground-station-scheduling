@@ -9,14 +9,14 @@
 4. `docs/reviews/` 最新的 `S<n>-codex*.md` 與 `S<n>-response.md` — 目前審查狀態
 
 ## 目前狀態（更新於每次送審）
-- S0 規格：通過。S1：r3 通過。S2（GA 兩種編碼 + 實驗分頁 + 產生器 + CSV）：r1 退回 6 項、r2 退回 2 項（N1/N2）皆已修正，**S2-r3 待 Codex 複審**。
-- 下一步：S2 通過 → S3（動畫 + 甘特圖拖曳 + 時窗拖曳 + 播放控制），見 SPEC §6、§8。
+- S0 規格：通過。S1：r3 通過。S2：r3 通過。S3（動畫 + 播放控制 + 甘特圖拖曳 + 時窗拖曳）：已實作，**S3 待 Codex 審查**。
+- 下一步：S3 通過 → S4（匯出收尾、localStorage 降級驗收、授權聲明、離線驗收紀錄），見 SPEC §7、§8。
 
 ## 指令
 ```
-npm test              # engine + ga 單元測試（純 Node，必須全綠）
+npm test              # engine + ga + anim 單元測試（純 Node，必須全綠）
 npm run build         # node build.js → dist/index.html（單檔，離線可開）
-npm run test:browser  # Playwright + Chromium 跑 S1、S2 瀏覽器驗收（file://）；無法下載 Chromium 時設 PW_CHANNEL=msedge 用本機 Edge
+npm run test:browser  # Playwright + Chromium 跑 S1–S3 瀏覽器驗收（file://）；無法下載 Chromium 時設 PW_CHANNEL=msedge 用本機 Edge
 python3 tools/enumerate.py src/data/default.json   # 全列舉 oracle，核對 (Z,W)
 ```
 

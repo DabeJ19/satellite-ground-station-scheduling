@@ -17,6 +17,8 @@
     solving: false,
     storageWarned: false,
     ga: { running: false, worker: null, results: [], curves: [], summary: null, mode: null, norm: null, revision: null },
+    play: { t: 0, playing: false, speed: 1, raf: null, last: null },
+    drag: null,
   };
   const gate = M.createGate();
   const gateGA = M.createGate();
@@ -73,6 +75,7 @@
     state.revision = (opts.revision != null) ? opts.revision : state.revision + 1;
     gate.setRevision(state.revision);
     gateGA.setRevision(state.revision);
+    if (state.play.t > state.norm.H) state.play.t = 0;
     state.draft = clone(state.data);
     saveLS();
     renderAll();
@@ -102,6 +105,7 @@
     document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('hidden', s.id !== 'tab-' + name));
     if (name === 'sched') renderSched();
     if (name === 'ga') drawGaChart();
+    if (name === 'data' && SGS.app && SGS.app._drawWinEditor) SGS.app._drawWinEditor();
   }
 
   // ---------- 資料分頁 ----------
@@ -195,6 +199,7 @@
     const p = el.dataset.path; if (!p) return;
     if (el.dataset.moveAntenna != null) return; // 換站在 change 處理
     setByPath(state.draft, p, parseByType(el.dataset.type || 'text', el.value));
+    if (/\.(start|end)$/.test(p) && SGS.app && SGS.app._drawWinEditor) SGS.app._drawWinEditor();
   }
   // change（失焦／選單）：引用 id 或頻段改變 → 重建選單；天線換站
   function onDraftChange(e) {
@@ -261,6 +266,7 @@
       <td class="num"><input type="number" step="1" data-type="int" data-path="requests[${i}].durMin" value="${val(r.durMin)}"></td>
       <td class="num"><input type="number" step="1" data-type="int" data-path="requests[${i}].start" value="${val(r.start)}"></td>
       <td class="num"><input type="number" step="1" data-type="int" data-path="requests[${i}].end" value="${val(r.end)}"></td>${del('requests', i)}</tr>`).join('');
+    if (SGS.app && SGS.app._drawWinEditor) SGS.app._drawWinEditor();
   }
 
   // ---------- 模型分頁 ----------
@@ -583,7 +589,8 @@ self.onmessage = function (e) {
         <div class="big">Z = ${s.score.assigned}</div>
         <div class="sub">總等待 ${s.score.totalWait} 分鐘 · objective ${s.score.objective.toFixed(4)} · ${s.feasible ? '<span style="color:var(--ok)">可行</span>' : '<span style="color:var(--bad)">不可行（' + s.violations.length + ' 條違規）</span>'}</div></div>`;
     }).join('');
-    drawGantt();
+    drawGantt(); drawAnim();
+    $('#playTime').textContent = state.norm ? E.minutesToHHMM(state.norm, Math.floor(state.play.t)) : '';
   }
 
   // 甘特圖幾何（可觀測，供測試核對）：回傳 {rows:[antennaId], blocks:[{req, antenna, start, end, calibEnd, x, y, w, h}]}
@@ -616,6 +623,7 @@ self.onmessage = function (e) {
     const cssW = canvas.clientWidth || 1000;
     const L = ganttLayout(norm, schedule, cssW);
     state.lastGantt = { rows: L.rows, blocks: L.blocks.map((b) => ({ req: b.req, antenna: b.antenna, start: b.start, end: b.end, calibEnd: b.calibEnd })) };
+    state.lastGanttLayout = L;
     canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(L.height * dpr); canvas.style.height = L.height + 'px';
     const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
     const cs = getComputedStyle(document.documentElement);
@@ -637,8 +645,11 @@ self.onmessage = function (e) {
       ctx.fillStyle = C('--text'); ctx.textAlign = 'left'; ctx.fillText(`${a.id}  (${a.band}, c=${a.calib})`, 8, y + L.rowH / 2);
     });
     L.blocks.forEach((b) => {
+      const dragging = state.drag && state.drag.kind === 'block' && state.drag.req === b.req;
+      ctx.globalAlpha = dragging ? 0.35 : 1;
       ctx.fillStyle = C('--calib'); ctx.fillRect(b.cx, b.y + 1, b.cw, b.h - 2);
       ctx.fillStyle = satColor(b.sat); roundRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.fill();
+      ctx.globalAlpha = 1;
       ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 11px system-ui, sans-serif';
       ctx.fillText(b.req, b.x + b.w / 2, b.y + b.h / 2);
       ctx.font = '11px system-ui, sans-serif';
@@ -649,9 +660,234 @@ self.onmessage = function (e) {
       L.blocks.forEach((b) => { if (bad.has(b.req)) { roundRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.stroke(); } });
       ctx.lineWidth = 1;
     }
+    // 拖曳中的 ghost
+    if (state.drag && state.drag.ghost) {
+      const g = state.drag.ghost;
+      const r = norm.reqById.get(g.req);
+      if (r) {
+        const ri = L.rows.indexOf(g.antenna);
+        const y = ri >= 0 ? L.top + ri * L.rowH + 9 : (state.drag.lastY - (L.rowH - 18) / 2);
+        ctx.globalAlpha = 0.8; ctx.fillStyle = satColor(r.sat);
+        roundRect(ctx, L.x(g.start), y, Math.max(2, L.x(g.start + r.durMin) - L.x(g.start)), L.rowH - 18, 4); ctx.fill();
+        ctx.strokeStyle = g.ok ? C('--ok') : C('--bad'); ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1; ctx.lineWidth = 1;
+        ctx.fillStyle = C('--text'); ctx.textAlign = 'left'; ctx.fillText(`${r.id} → ${g.antenna || '?'} @ ${E.minutesToHHMM(norm, g.start)}`, L.x(g.start), y - 6);
+      }
+    }
+    // 時間游標（與動畫同步）
+    const t = state.play.t;
+    if (t >= 0 && t <= norm.H) {
+      ctx.strokeStyle = C('--warn'); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(L.x(t), L.top - 6); ctx.lineTo(L.x(t), L.height - 10); ctx.stroke(); ctx.lineWidth = 1;
+      ctx.fillStyle = C('--warn'); ctx.textAlign = 'center'; ctx.fillText(E.minutesToHHMM(norm, Math.floor(t)), L.x(t), L.top - 28);
+    }
     $('#legend').innerHTML = norm.satellites.map((s) => `<span><i class="sw" style="background:${esc(satColor(s.id))}"></i>${esc(s.id)}</span>`).join('') +
-      `<span><i class="sw" style="background:${C('--calib')}"></i>校準</span><span><i class="sw" style="background:${withAlpha('#888', .3)}"></i>飛越時窗（淡色 = 該衛星）</span>`;
+      `<span><i class="sw" style="background:${C('--calib')}"></i>校準</span><span><i class="sw" style="background:${withAlpha('#888', .3)}"></i>飛越時窗（淡色 = 該衛星）</span><span><i class="sw" style="background:${C('--warn')}"></i>時間游標</span>`;
+    renderTray(norm, schedule);
   }
+
+  // ---------- 托盤（未排入需求） ----------
+  function renderTray(norm, schedule) {
+    const assigned = new Set((schedule || []).map((it) => it.req));
+    const chips = norm.requests.filter((r) => !assigned.has(r.id));
+    $('#trayChips').innerHTML = chips.length ? chips.map((r) => `<span class="chip" data-chip="${esc(r.id)}" style="background:${esc((norm.satById.get(r.sat) || {}).color || '#888')}">${esc(r.id)} · ${esc(r.band)} · ${r.durMin}m</span>`).join('') : '<span class="muted small">（全部已排入）</span>';
+  }
+
+  // ---------- 甘特圖拖曳（§6）：操作一律落在「手動」解槽 ----------
+  function ensureManual() {
+    const cur = state.slots[state.activeSlot];
+    if (state.activeSlot === 'manual' && state.slots.manual && state.slots.manual.revision === state.revision) return state.slots.manual;
+    const base = cur && cur.revision === state.revision ? cur.schedule : (state.slots.manual && state.slots.manual.revision === state.revision ? state.slots.manual.schedule : []);
+    const slot = makeSlot(state.norm, state.data, clone(base), { source: 'manual', label: { kind: 'feas', text: '手動' }, basedOn: state.activeSlot }, state.revision);
+    state.slots.manual = slot; state.activeSlot = 'manual';
+    return slot;
+  }
+  function setManualTask(req, antenna, start) {
+    const slot = ensureManual();
+    const sched = slot.schedule.filter((it) => it.req !== req);
+    if (antenna != null) sched.push({ req, antenna, start });
+    setSlot('manual', makeSlot(state.norm, state.data, sched, { source: 'manual', label: { kind: 'feas', text: '手動' } }, state.revision));
+    return state.slots.manual;
+  }
+  function ganttPointToSlot(L, px, py) {
+    const ri = Math.floor((py - L.top) / L.rowH);
+    const antenna = ri >= 0 && ri < L.rows.length ? L.rows[ri] : null;
+    const t = Math.round(((px - L.left) / L.plotW) * state.norm.H);
+    return { antenna, t, inRows: antenna != null && px >= L.left && px <= L.left + L.plotW };
+  }
+  function initGanttDrag() {
+    const canvas = $('#gantt');
+    const tray = $('#ganttTray');
+    const pos = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    const startDrag = (kind, req, offsetT, e) => {
+      state.drag = { kind, req, offsetT, ghost: null, lastY: 0 };
+      canvas.classList.add('dragging');
+      moveDrag(e);
+    };
+    const moveDrag = (e) => {
+      const d = state.drag; if (!d || !state.norm) return;
+      const L = state.lastGanttLayout; if (!L) return;
+      const p = pos(e); d.lastY = p.y;
+      const r = state.norm.reqById.get(d.req);
+      const { antenna, t } = ganttPointToSlot(L, p.x, p.y);
+      const start = Math.max(0, Math.min(state.norm.H - r.durMin, t - d.offsetT));
+      const overTray = e.target === tray || tray.contains(e.target);
+      tray.classList.toggle('over', overTray);
+      if (overTray || !antenna) { d.ghost = null; drawGantt(); return; }
+      const slot = state.slots[state.activeSlot];
+      const base = (state.activeSlot === 'manual' && slot && slot.revision === state.revision ? slot.schedule : ((slot && slot.revision === state.revision) ? slot.schedule : [])).filter((it) => it.req !== d.req);
+      const ok = E.checkFeasible(state.norm, base.concat([{ req: d.req, antenna, start }])).ok;
+      d.ghost = { req: d.req, antenna, start, ok };
+      drawGantt();
+    };
+    const endDrag = (e) => {
+      const d = state.drag; if (!d) return;
+      const overTray = e && (e.target === tray || tray.contains(e.target));
+      state.drag = null; canvas.classList.remove('dragging'); tray.classList.remove('over');
+      if (overTray) { setManualTask(d.req, null, null); return; }
+      if (d.ghost) setManualTask(d.ghost.req, d.ghost.antenna, d.ghost.start); else drawGantt();
+    };
+    canvas.addEventListener('pointerdown', (e) => {
+      if (!state.norm || !state.lastGanttLayout) return;
+      const p = pos(e);
+      const hits = state.lastGanttLayout.blocks.filter((bl) => p.x >= bl.x && p.x <= bl.x + bl.w && p.y >= bl.y && p.y <= bl.y + bl.h);
+      const b = hits[hits.length - 1];   // 重疊時取最後繪製（最上層）的區塊
+      if (!b) return;
+      e.preventDefault();
+      const tAt = ((p.x - state.lastGanttLayout.left) / state.lastGanttLayout.plotW) * state.norm.H;
+      startDrag('block', b.req, Math.round(tAt - b.start), e);
+    });
+    $('#trayChips').addEventListener('pointerdown', (e) => {
+      const c = e.target.closest('[data-chip]'); if (!c) return;
+      e.preventDefault();
+      startDrag('chip', c.dataset.chip, 0, e);
+    });
+    window.addEventListener('pointermove', (e) => { if (state.drag) moveDrag(e); });
+    window.addEventListener('pointerup', (e) => { if (state.drag) endDrag(e); });
+  }
+
+  // ---------- 播放控制 + 動畫（§6） ----------
+  let animFit = null, animFitKey = null;
+  function getFit(norm) {
+    if (animFit && animFitKey === norm) return animFit;
+    animFit = SGS.anim.fitAll(norm); animFitKey = norm; return animFit;
+  }
+  function initPlayback() {
+    $('#btnPlay').onclick = () => (state.play.playing ? pausePlay() : startPlay());
+    $('#playSpeed').onchange = () => { state.play.speed = Number($('#playSpeed').value) || 1; };
+    $('#playScrub').oninput = () => { const H = state.norm ? state.norm.H : 100; setTime(Number($('#playScrub').value) / 100 * H); };
+    $('#showResidual').onchange = () => drawAnim();
+    $('#btnAnimPng').onclick = () => { $('#anim').toBlob((blob) => downloadBlob('animation-frame.png', blob)); };
+    window.addEventListener('resize', () => { if (!$('#tab-sched').classList.contains('hidden')) drawAnim(); });
+  }
+  function setTime(t) {
+    const H = state.norm ? state.norm.H : 100;
+    state.play.t = Math.max(0, Math.min(H, t));
+    $('#playScrub').value = (state.play.t / H * 100).toFixed(1);
+    $('#playTime').textContent = state.norm ? E.minutesToHHMM(state.norm, Math.floor(state.play.t)) : '';
+    drawGantt(); drawAnim();
+  }
+  function startPlay() {
+    state.play.playing = true; state.play.last = null; $('#btnPlay').textContent = '❚❚ 暫停';
+    const step = (ts) => {
+      if (!state.play.playing) return;
+      if (state.play.last != null) {
+        const dt = (ts - state.play.last) / 1000;             // 秒
+        let t = state.play.t + dt * state.play.speed;        // 1× = 每秒 1 分鐘
+        const H = state.norm ? state.norm.H : 100;
+        if (t > H) t = 0;                                     // 循環
+        setTime(t);
+      }
+      state.play.last = ts;
+      state.play.raf = requestAnimationFrame(step);
+    };
+    state.play.raf = requestAnimationFrame(step);
+  }
+  function pausePlay() { state.play.playing = false; if (state.play.raf) cancelAnimationFrame(state.play.raf); state.play.raf = null; $('#btnPlay').textContent = '▶ 播放'; }
+  function drawAnim() {
+    const canvas = $('#anim'); if (!canvas) return;
+    const slot = state.slots[state.activeSlot];
+    const norm = slot ? slot.norm : state.norm; if (!norm) return;
+    const dpr = window.devicePixelRatio || 1, cssW = canvas.clientWidth || 500, cssH = 420;
+    canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr); canvas.style.height = cssH + 'px';
+    const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+    const cs = getComputedStyle(document.documentElement); const C = (n) => cs.getPropertyValue(n).trim();
+    const theme = { bg: C('--bg'), panel: C('--panel'), text: C('--text'), muted: C('--muted'), line: C('--line'), accent: C('--accent'), calib: C('--calib') };
+    const satColor = (id) => { const s = norm.satById.get(id); return (s && s.color) || palette(norm.satellites.findIndex((q) => q.id === id)); };
+    const fit = getFit(norm);
+    state.lastAnim = SGS.anim.drawFrame(ctx, norm, slot ? slot.schedule : [], state.play.t, fit, { w: cssW, h: cssH, theme, satColor, showResidual: $('#showResidual').checked });
+    state.lastAnim.t = state.play.t; state.lastAnim.fit = { omega: fit.omega, phis: Object.fromEntries(Array.from(fit.sats.entries()).map(([k, v]) => [k, v.phi])), residuals: Object.fromEntries(Array.from(fit.sats.entries()).map(([k, v]) => [k, v.residual])) };
+  }
+
+  // ---------- 時窗時間軸編輯（資料分頁，拖曳改 start/end；改 draft，需套用） ----------
+  function initWinEditor() {
+    const canvas = $('#winEditor');
+    let drag = null;
+    const layoutRows = () => {
+      const d = state.draft; if (!d) return null;
+      const rows = [];
+      (d.visibility || []).forEach((v, i) => rows.push({ kind: 'visibility', index: i, label: `${v.sat} @ ${v.station}`, start: v.start, end: v.end, color: (d.satellites.find((s) => s.id === v.sat) || {}).color || '#888' }));
+      (d.requests || []).forEach((r, i) => rows.push({ kind: 'requests', index: i, label: `${r.id} (${r.sat}, ${r.band}, ${r.durMin}m)`, start: r.start, end: r.end, color: (d.satellites.find((s) => s.id === r.sat) || {}).color || '#888', hatched: true }));
+      const H = Number.isInteger(d.meta.horizonMin) && d.meta.horizonMin > 0 ? d.meta.horizonMin : 1;
+      return { rows, H };
+    };
+    const geom = (cssW) => ({ left: 170, right: 16, top: 24, rowH: 22 });
+    function draw() {
+      const Lr = layoutRows(); if (!Lr) return;
+      const dpr = window.devicePixelRatio || 1, cssW = canvas.clientWidth || 800;
+      const G = geom(cssW); const cssH = G.top + Lr.rows.length * G.rowH + 8;
+      canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr); canvas.style.height = cssH + 'px';
+      const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+      const cs = getComputedStyle(document.documentElement); const C = (n) => cs.getPropertyValue(n).trim();
+      ctx.clearRect(0, 0, cssW, cssH);
+      const plotW = cssW - G.left - G.right, x = (t) => G.left + (t / Lr.H) * plotW;
+      ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'middle';
+      const step = Lr.H <= 60 ? 5 : Lr.H <= 240 ? 15 : 60;
+      for (let t = 0; t <= Lr.H; t += step) { ctx.strokeStyle = C('--grid'); ctx.beginPath(); ctx.moveTo(x(t), G.top - 4); ctx.lineTo(x(t), cssH - 8); ctx.stroke(); ctx.fillStyle = C('--muted'); ctx.textAlign = 'center'; ctx.fillText(String(t), x(t), 10); }
+      Lr.rows.forEach((r, i) => {
+        const y = G.top + i * G.rowH;
+        ctx.fillStyle = C('--text'); ctx.textAlign = 'left'; ctx.fillText(r.label, 6, y + G.rowH / 2);
+        if (!Number.isInteger(r.start) || !Number.isInteger(r.end)) return;
+        const bx = x(Math.max(0, r.start)), bw = Math.max(2, x(Math.min(Lr.H, r.end)) - bx);
+        ctx.fillStyle = r.hatched ? withAlpha(r.color, 0.45) : withAlpha(r.color, 0.8);
+        ctx.fillRect(bx, y + 4, bw, G.rowH - 8);
+        ctx.fillStyle = C('--text'); ctx.fillRect(bx, y + 4, 3, G.rowH - 8); ctx.fillRect(bx + bw - 3, y + 4, 3, G.rowH - 8);
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = '10px system-ui, sans-serif'; ctx.fillText(`${r.start}–${r.end}`, bx + bw / 2, y + G.rowH / 2); ctx.font = '11px system-ui, sans-serif';
+      });
+      state.lastWinEditor = { rows: Lr.rows.map((r) => ({ kind: r.kind, index: r.index, start: r.start, end: r.end })), H: Lr.H, left: G.left, plotW, top: G.top, rowH: G.rowH };
+    }
+    const hit = (px, py) => {
+      const W = state.lastWinEditor; if (!W) return null;
+      const i = Math.floor((py - W.top) / W.rowH); if (i < 0 || i >= W.rows.length) return null;
+      const r = W.rows[i]; const x = (t) => W.left + (t / W.H) * W.plotW;
+      const bx = x(r.start), ex = x(r.end);
+      if (Math.abs(px - bx) <= 6) return { row: r, part: 'start' };
+      if (Math.abs(px - ex) <= 6) return { row: r, part: 'end' };
+      if (px > bx && px < ex) return { row: r, part: 'move' };
+      return null;
+    };
+    const toT = (px) => { const W = state.lastWinEditor; return Math.round(((px - W.left) / W.plotW) * W.H); };
+    canvas.addEventListener('pointermove', (e) => {
+      const r = canvas.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
+      if (!drag) { const h = hit(px, py); canvas.style.cursor = h ? (h.part === 'move' ? 'grab' : 'ew-resize') : 'default'; return; }
+      const W = state.lastWinEditor; const item = state.draft[drag.row.kind][drag.row.index]; if (!item) return;
+      const t = toT(px);
+      if (drag.part === 'start') item.start = Math.max(0, Math.min(item.end - 1, t));
+      else if (drag.part === 'end') item.end = Math.max(item.start + 1, Math.min(W.H, t));
+      else { const len = drag.len; let ns = Math.max(0, Math.min(W.H - len, t - drag.offset)); item.start = ns; item.end = ns + len; }
+      draw();
+    });
+    canvas.addEventListener('pointerdown', (e) => {
+      const r = canvas.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
+      const h = hit(px, py); if (!h) return;
+      e.preventDefault();
+      drag = { row: h.row, part: h.part, len: h.row.end - h.row.start, offset: toT(px) - h.row.start };
+      canvas.setPointerCapture(e.pointerId);
+    });
+    const end = () => { if (!drag) return; drag = null; renderDataTab(); draw(); };
+    canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
+    window.addEventListener('resize', () => { if (!$('#tab-data').classList.contains('hidden')) draw(); });
+    SGS.app._drawWinEditor = draw;
+  }
+
 
   function roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
@@ -678,7 +914,7 @@ self.onmessage = function (e) {
 
   // ---------- 啟動 ----------
   function boot() {
-    initChrome(); initData(); initModel(); initGA(); initSched();
+    initChrome(); initData(); initModel(); initGA(); initSched(); initGanttDrag(); initPlayback(); initWinEditor();
     const saved = loadLS();
     let loaded = false;
     if (saved && saved.data && E.validateData(saved.data).ok) {
@@ -705,6 +941,7 @@ self.onmessage = function (e) {
     showTab, loadData, importJSONText, applyDraft, solveMILP, cancelSolve, setSlot, makeSlot, renderSched, ganttLayout,
     runGA, cancelGA, readGaParams, writeGaParams, validateGaParams, csvCurves, csvStats, csvSchedule, gaReference,
     _setWorkerFactory: (fn) => { workerFactory = fn; },
+    setTime, startPlay, pausePlay, setManualTask, ensureManual, drawAnim, getFit,
     getDraft: () => state.draft,
     _setGLPKFactory: (fn) => { destroyGLPK(); glpkFactory = fn; },
     _glpkDebug: () => ({ inst: glpkInst, pending: !!glpkPromise, gen: glpkGen }),
