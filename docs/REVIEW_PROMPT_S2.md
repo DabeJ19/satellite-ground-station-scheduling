@@ -1,6 +1,6 @@
 # Codex 審查 Prompt — S2
 
-審 S2（程式碼審查）。被審 commit `__SHA__`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S2-codex.md`，不改其他檔。
+審 S2（程式碼審查）。被審 commit `792abdb`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S2-codex.md`，不改其他檔。
 
 讀：`docs/REVIEW_REQUEST_S2.md` → `SPEC.md` §3（generateInstance）、§5、§8 S2 → `src/ga.js` → `src/engine.js`（generateInstance）→ `src/ui.js`（GA 區段：WORKER_MAIN、runGA、finishGA、summarize 呼叫、CSV）→ `build.js`（SGS_SOURCES）→ `tests/ga.test.js`、`tests/browser.s2.js`。不審 `dist/`、`vendor/`。
 
