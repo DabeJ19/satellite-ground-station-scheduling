@@ -27,6 +27,12 @@
 ## 針對 SPEC 開放問題的意見
 ```
 
+## 儲存庫與同步（GitHub 為共用中心）
+- GitHub：https://github.com/DabeJ19/satellite-ground-station-scheduling（public，`main`）
+- 工程方（Claude Code）在雲端工作區 commit 並 push 到 `main`；PO 本機資料夾只做 `git pull` 取最新（開 `dist/index.html` 用）。
+- 審查方（Codex / ChatGPT）從 GitHub 讀取；審查結果以分支 `review/<sprint>` + Pull Request 提交 `docs/reviews/<sprint>-codex.md`，由工程方合併。
+- 若審查方在本機執行而無法 push，直接把檔案寫在本機資料夾，工程方會同步上去。
+
 ## 指令
 - 建置：`node build.js`
 - 開啟：直接雙擊 `dist/index.html`

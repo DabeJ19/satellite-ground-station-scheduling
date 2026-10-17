@@ -1,6 +1,6 @@
 # Codex 審查 Prompt — S0
 
-（在專案根目錄 `衛星軌道/` 啟動 Codex，整段貼上）
+（兩種用法擇一：A. 在 ChatGPT / Codex 連接 GitHub repo `DabeJ19/satellite-ground-station-scheduling` 後整段貼上；B. 在本機專案根目錄啟動 Codex CLI 後整段貼上）
 
 ---
 
@@ -37,6 +37,6 @@ D. **工程**（SPEC §7、build.js）
 
 E. **SPEC §9 開放問題**：請對三個開放問題各給一個明確建議。
 
-輸出：將審查結果寫入 `docs/reviews/S0-codex.md`，格式完全依 `AGENTS.md` 的「審查回覆格式」。
+輸出：將審查結果寫入 `docs/reviews/S0-codex.md`，格式完全依 `AGENTS.md` 的「審查回覆格式」。若你在 GitHub 環境工作，請建立分支 `review/S0` 並開 Pull Request 到 `main`；若在本機，直接寫檔即可。
 每個阻擋項與建議項都要標明對應的 SPEC 章節，並給出可直接採用的修改文字。
 最後在終端摘要：結論（通過／有條件通過／退回）、阻擋項數量、建議項數量。
