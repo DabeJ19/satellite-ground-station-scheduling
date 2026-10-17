@@ -83,6 +83,59 @@ test('contactState ignores malformed items', () => {
   assert.deepStrictEqual([st.active.length, st.calibrating.length], [0, 0]);
 });
 
+section('phase fit — multi-basin tie-breaking (S3-r2 B3)');
+test('seven rotation-equivalent minima → smallest normalized angle 0.1°, reproducible, RMS 720/7', () => {
+  const st = [], vis = [];
+  for (let i = 0; i < 7; i++) { st.push({ id: 'G' + i, angleDeg: (180.1 + 360 * i / 7) % 360, antennas: [{ id: 'a' + i, band: 'S' }] }); vis.push({ sat: 'A', station: 'G' + i, start: 0, end: 60 }); }
+  const norm = E.normalize({ meta: { horizonMin: 60, calibDefaultMin: 0 }, bands: ['S'], satellites: [{ id: 'A' }], stations: st, visibility: vis, requests: [] });
+  for (let k = 0; k < 3; k++) {
+    const f = A.fitAll(norm).sats.get('A');
+    assert.ok(Math.abs(A.circDiff(f.phi, 0.1)) <= 0.001, 'phi=' + f.phi);
+    assert.ok(Math.abs(f.residual - 720 / 7) <= 0.001, 'rms=' + f.residual);
+    assert.strictEqual(f.candidates, 7);
+  }
+});
+test('single point whose optimum straddles the 359.5°/0° grid boundary is refined and normalized to [0,360)', () => {
+  // H=120 → ω=3；站角 2.9°，時窗 [0,2) tMid=1 → 3·1+φ ≡ 2.9 → φ=359.9（盆地跨 359.5/0 交界）
+  const d = { meta: { horizonMin: 120, calibDefaultMin: 0 }, bands: ['S'], satellites: [{ id: 'A' }], stations: [{ id: 'G', angleDeg: 2.9, antennas: [{ id: 'a', band: 'S' }] }], visibility: [{ sat: 'A', station: 'G', start: 0, end: 2 }], requests: [] };
+  const f = A.fitAll(E.normalize(d)).sats.get('A');
+  assert.ok(f.phi >= 0 && f.phi < 360);
+  assert.ok(Math.abs(A.circDiff(f.phi, 359.9)) <= 0.001, 'phi=' + f.phi);
+  assert.ok(f.residual <= 0.001);
+  // 同一點改成 0.1° 目標（φ=357.1→ 正規化不跨界）仍一致
+  d.stations[0].angleDeg = 0.1;
+  const g = A.fitAll(E.normalize(d)).sats.get('A');
+  assert.ok(Math.abs(A.circDiff(g.phi, 357.1)) <= 0.001, 'phi=' + g.phi);
+});
+
+section('drawFrame rendering decisions (S3-r2 B4/B5)');
+const stubCtx = () => new Proxy({}, { get: (o, k) => (k in o ? o[k] : (k === 'createRadialGradient' || k === 'createLinearGradient') ? () => ({ addColorStop() {} }) : k === 'measureText' ? () => ({ width: 10 }) : () => {}), set: (o, k, v) => { o[k] = v; return true; } });
+const theme = { bg: '#000', panel: '#111', text: '#fff', muted: '#888', line: '#333', accent: '#4f8ef7', calib: '#555' };
+const draw = (norm, schedule, t) => A.drawFrame(stubCtx(), norm, schedule, t, A.fitAll(norm), { w: 600, h: 400, theme, satColor: () => '#f00', showResidual: true });
+test('B4: ids containing NUL do not collide — only the station actually in a window glows', () => {
+  // sat 'A\u0000B' @ station 'C'  vs  sat 'A' @ station 'B\u0000C'：舊鍵 sat+NUL+station 兩者相同
+  const d = { meta: { horizonMin: 60, calibDefaultMin: 0 }, bands: ['S'], satellites: [{ id: 'A\u0000B' }, { id: 'A' }],
+    stations: [{ id: 'C', angleDeg: 0, antennas: [{ id: 'c', band: 'S' }] }, { id: 'B\u0000C', angleDeg: 180, antennas: [{ id: 'bc', band: 'S' }] }],
+    visibility: [{ sat: 'A\u0000B', station: 'C', start: 0, end: 10 }], requests: [] };
+  const norm = E.normalize(d);
+  const st = draw(norm, [], 5);
+  assert.deepStrictEqual(st.visible.map((v) => [v.sat, v.station]), [['A\u0000B', 'C']]);
+  assert.deepStrictEqual(st.render.litStations, ['C']);        // 'B\u0000C' 不得發光
+  assert.deepStrictEqual(st.render.litSats, ['A\u0000B']);     // 'A' 不得發光
+});
+test('B5: full-horizon window [0,H) is drawn as a full 2π arc; partial window spans ω·(end−start)', () => {
+  const norm = E.normalize({ meta: { horizonMin: 60, calibDefaultMin: 0 }, bands: ['S'], satellites: [{ id: 'A' }], stations: [{ id: 'G', angleDeg: 0, antennas: [{ id: 'a', band: 'S' }] }],
+    visibility: [{ sat: 'A', station: 'G', start: 0, end: 60 }], requests: [] });
+  const st = draw(norm, [], 1);
+  assert.strictEqual(st.render.arcs.length, 1);
+  assert.ok(Math.abs(st.render.arcs[0].spanRad - 2 * Math.PI) < 1e-9, 'span=' + st.render.arcs[0].spanRad);
+  const norm2 = E.normalize({ meta: { horizonMin: 60, calibDefaultMin: 0 }, bands: ['S'], satellites: [{ id: 'A' }], stations: [{ id: 'G', angleDeg: 0, antennas: [{ id: 'a', band: 'S' }] }],
+    visibility: [{ sat: 'A', station: 'G', start: 50, end: 60 }], requests: [] });   // 跨 360°：a0 在 300°−90°，跨度 60°
+  const st2 = draw(norm2, [], 1);
+  assert.ok(Math.abs(st2.render.arcs[0].spanRad - Math.PI / 3) < 1e-9, 'span=' + st2.render.arcs[0].spanRad);
+  assert.ok(st2.render.arcs[0].a1 > st2.render.arcs[0].a0);
+});
+
 section('layout');
 test('orbit radii strictly increasing per satellite; all inside canvas', () => {
   const norm = E.normalize(DEFAULT);
@@ -90,6 +143,15 @@ test('orbit radii strictly increasing per satellite; all inside canvas', () => {
   const rs = norm.satellites.map((s) => L.orbitR.get(s.id));
   for (let i = 1; i < rs.length; i++) assert.ok(rs[i] > rs[i - 1]);
   assert.ok(rs[rs.length - 1] <= 200);
+});
+test('A2: many satellites still fit inside the canvas (orbits shrink Earth radius / gap)', () => {
+  const sats = Array.from({ length: 14 }, (_, i) => ({ id: 'S' + i }));
+  const norm = E.normalize({ meta: { horizonMin: 60, calibDefaultMin: 0 }, bands: ['S'], satellites: sats, stations: [{ id: 'G', angleDeg: 0, antennas: [{ id: 'a', band: 'S' }] }], visibility: [], requests: [] });
+  const L = A.layout(norm, 500, 420);
+  const rs = sats.map((s) => L.orbitR.get(s.id));
+  for (let i = 1; i < rs.length; i++) assert.ok(rs[i] > rs[i - 1]);
+  assert.ok(rs[rs.length - 1] + 24 <= Math.min(500, 420) / 2 + 1e-9, 'outer=' + rs[rs.length - 1]);
+  assert.ok(L.Re >= 12);
 });
 
 (async () => {

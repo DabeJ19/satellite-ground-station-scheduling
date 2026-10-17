@@ -134,3 +134,16 @@
 | 覆蓋錐 | ±14° 示意，僅視覺 | 示意動畫 |
 | 時窗時間軸 | 資料分頁 canvas：visibility 與需求時窗列，拖端點改 start/end、拖中段平移；只改 draft，需「套用變更」 | §6 第 1 點 |
 | 動畫幀 PNG | 提前於 S3 實作 | 成本低 |
+
+## 2026-10-17 S3 Codex 審查 r1 → r2
+| 項目 | 決定 | 原因 |
+|---|---|---|
+| B1 拖曳版本守門 | 舊版本解槽拒絕拖曳（提示文字）；拖曳記住起始版本；commit／pointercancel／版本變更即 `cancelDrag()`；ghost 與 `ensureManual` 共用 `manualBase()` | 避免 `state.norm` 與 `slot.norm` 混用導致 TypeError 與基底不一致 |
+| B2 播放資料來源 | `viewNorm()` = 選中解槽 norm，否則目前 norm；拉桿／標籤／循環／夾值全用它；切槽與 commit 呼叫 `syncPlay()`；commit 先 `pausePlay()` | 甘特與動畫已用解槽 norm，播放列需一致 |
+| B3 相位多解 | 格點收集所有局部盆地、各自細化、容差 1e-6 相對、等價取最小角 | 七站 fixture 由 51.53° 修正為 0.1° |
+| B4 複合鍵 | `JSON.stringify([sat, station])` | NUL 分隔重新引入碰撞 |
+| B5 弧長 | `a1 = a0 + ω·(end−start)`（弧度） | `[0,H)` 不再畫成 0 長 |
+| A1 時窗編輯器重畫 | `horizonMin` 與影響列標籤欄位（id/sat/station/durMin）input 即重畫 | 提前於 S3-r2 落實 |
+| A2 多衛星版面 | 軌道間距 < 8px 時縮小地球半徑（下限 12）與間距（下限 3），外圈留 24px | 提前於 S3-r2 落實 |
+| drawFrame 可觀測 | 回傳 `render:{arcs,litStations,litSats}` 供 Node 測試 | 不必 mock 完整 canvas |
+

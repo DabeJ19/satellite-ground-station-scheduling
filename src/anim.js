@@ -24,17 +24,30 @@
     if (m) m.forEach((segs, station) => segs.forEach(([a, b]) => pts.push({ tMid: (a + b) / 2, theta: angles.get(station) })));
     if (!pts.length) return { phi: null, residual: null, points: 0 };
     const cost = (phi) => pts.reduce((s, p) => s + circDiff(omega * p.tMid + phi, p.theta) ** 2, 0);
-    let best = 0, bestC = Infinity;
-    for (let phi = 0; phi < 360; phi += 0.5) { const c = cost(phi); if (c < bestC - 1e-9) { bestC = c; best = phi; } }
-    // 細化（固定步長縮小，確定性）
-    let step = 0.25, phi = best;
-    for (let k = 0; k < 10; k++) {
-      const cands = [phi - step, phi + step].map(norm360);
-      let moved = false;
-      for (const c of cands) { const v = cost(c); if (v < bestC - 1e-12) { bestC = v; phi = c; moved = true; } }
-      if (!moved) step /= 2;
+    // 0.5° 格點（含 359.5°/0° 交界）→ 找出所有局部最低盆地 → 各自細化 → cost 等價（容差）者取最小角度
+    const STEP = 0.5, N = Math.round(360 / STEP);
+    const grid = new Array(N);
+    for (let i = 0; i < N; i++) grid[i] = cost(i * STEP);
+    const basins = [];
+    for (let i = 0; i < N; i++) {
+      const prev = grid[(i - 1 + N) % N], next = grid[(i + 1) % N];
+      if (grid[i] <= prev && grid[i] <= next) basins.push(i * STEP);
     }
-    return { phi: norm360(phi), residual: Math.sqrt(bestC / pts.length), points: pts.length };
+    const refine = (phi0) => {
+      let phi = phi0, c = cost(phi0), step = STEP / 2;
+      while (step > 1e-5) {
+        let moved = false;
+        for (const cand of [phi - step, phi + step]) { const v = cost(cand); if (v < c - 1e-12) { c = v; phi = cand; moved = true; } }
+        if (!moved) step /= 2;
+      }
+      return { phi: norm360(phi), c };
+    };
+    const cands = basins.map(refine);
+    const minC = Math.min(...cands.map((x) => x.c));
+    const TOL = 1e-6 * Math.max(1, minC);
+    const ties = cands.filter((x) => x.c <= minC + TOL).map((x) => x.phi).sort((a, b) => a - b);
+    const phi = ties[0];
+    return { phi, residual: Math.sqrt(minC / pts.length), points: pts.length, candidates: cands.length };
   }
 
   // 整體擬合結果：{ omega, angles: Map, sats: Map<satId, {phi, residual, points}> }
@@ -73,8 +86,9 @@
     const cx = w / 2, cy = h / 2;
     const n = Math.max(1, norm.satellites.length);
     const minDim = Math.min(w, h);
-    const Re = Math.max(30, minDim * 0.16);
-    const gap = Math.max(10, (minDim / 2 - Re - 24) / n);
+    let Re = Math.max(30, minDim * 0.16);
+    let gap = (minDim / 2 - Re - 24) / n;          // 外圈留 24px 給衛星符號與標籤
+    if (gap < 8) { Re = Math.max(12, minDim / 2 - 24 - 8 * n); gap = Math.max(3, (minDim / 2 - Re - 24) / n); }
     const orbitR = new Map();
     norm.satellites.forEach((s, i) => orbitR.set(s.id, Re + gap * (i + 1)));
     return { cx, cy, Re, gap, orbitR };
@@ -87,9 +101,11 @@
     const L = layout(norm, w, h);
     ctx.clearRect(0, 0, w, h);
     const st = contactState(norm, schedule, t);
-    const visibleSet = new Set(st.visible.map((v) => v.sat + '\u0000' + v.station));
+    const visKey = (sat, station) => JSON.stringify([sat, station]);
+    const visibleSet = new Set(st.visible.map((v) => visKey(v.sat, v.station)));
     const activeByStation = new Map(); st.active.forEach((a) => { if (!activeByStation.has(a.station)) activeByStation.set(a.station, []); activeByStation.get(a.station).push(a); });
     const calibSet = new Set(st.calibrating.map((c) => c.antenna));
+    const render = { arcs: [], litStations: [], litSats: [] };   // 可觀測的渲染決策（測試用）
 
     // 軌道 + 時窗對應的軌道弧（發光）
     norm.satellites.forEach((s) => {
@@ -97,9 +113,10 @@
       ctx.strokeStyle = theme.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(L.cx, L.cy, r, 0, Math.PI * 2); ctx.stroke();
       const m = norm.visBySat.get(s.id);
       if (m) m.forEach((segs) => segs.forEach(([a, b]) => {
-        const a0 = (satAngle(fit, s.id, a) - 90) * Math.PI / 180, a1 = (satAngle(fit, s.id, b) - 90) * Math.PI / 180;
+        const a0 = (satAngle(fit, s.id, a) - 90) * Math.PI / 180, a1 = a0 + fit.omega * (b - a) * Math.PI / 180;   // 弧長用未取模的跨度
         ctx.strokeStyle = satColor(s.id); ctx.globalAlpha = (t >= a && t < b) ? 0.9 : 0.3; ctx.lineWidth = (t >= a && t < b) ? 4 : 2;
         ctx.beginPath(); ctx.arc(L.cx, L.cy, r, a0, a1); ctx.stroke(); ctx.globalAlpha = 1;
+        render.arcs.push({ sat: s.id, start: a, end: b, a0, a1, spanRad: a1 - a0 });
       }));
     });
     // 地球
@@ -111,7 +128,8 @@
       const ang = fit.angles.get(s.id);
       const p = polar(L.cx, L.cy, L.Re, ang);
       const outer = L.Re + L.gap * norm.satellites.length + 6;
-      const anyVisible = norm.satellites.some((sat) => visibleSet.has(sat.id + '\u0000' + s.id));
+      const anyVisible = norm.satellites.some((sat) => visibleSet.has(visKey(sat.id, s.id)));
+      if (anyVisible) render.litStations.push(s.id);
       const cone = 14;
       ctx.beginPath(); ctx.moveTo(p.x, p.y);
       const q1 = polar(L.cx, L.cy, outer, ang - cone), q2 = polar(L.cx, L.cy, outer, ang + cone);
@@ -144,7 +162,8 @@
         ctx.fillStyle = satColor(s.id); ctx.font = 'bold 11px system-ui, sans-serif'; ctx.textAlign = 'center';
         ctx.fillText(a.req, (sp.x + p.x) / 2, (sp.y + p.y) / 2 - 8);
       });
-      const inWin = norm.stations.some((stn) => visibleSet.has(s.id + '\u0000' + stn.id));
+      const inWin = norm.stations.some((stn) => visibleSet.has(visKey(s.id, stn.id)));
+      if (inWin) render.litSats.push(s.id);
       if (inWin) { ctx.shadowColor = satColor(s.id); ctx.shadowBlur = 16; }
       ctx.fillStyle = satColor(s.id); ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
       ctx.fillStyle = theme.text; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.fillText(s.id, p.x + 9, p.y);
@@ -158,6 +177,7 @@
       let y = 44;
       fit.sats.forEach((f, id) => { ctx.fillText(`${id}: φ=${f.phi.toFixed(1)}°${f.residual == null ? '（無時窗）' : ' 擬合殘差 RMS ' + f.residual.toFixed(1) + '°'}`, 10, y); y += 14; });
     }
+    st.render = render;
     return st;
   }
 

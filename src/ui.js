@@ -75,7 +75,9 @@
     state.revision = (opts.revision != null) ? opts.revision : state.revision + 1;
     gate.setRevision(state.revision);
     gateGA.setRevision(state.revision);
-    if (state.play.t > state.norm.H) state.play.t = 0;
+    pausePlay();                       // 提交即暫停播放，清 rAF/last（B2）
+    cancelDrag();                      // 提交期間的拖曳作廢（B1）
+    syncPlay();                        // t 依播放資料來源重新夾住、同步拉桿
     state.draft = clone(state.data);
     saveLS();
     renderAll();
@@ -194,12 +196,13 @@
       if (k === 'bands') state.draft.bands = el.value.split(',').map((s) => s.trim()).filter(Boolean);
       else if (k === 'horizonMin' || k === 'calibDefaultMin') state.draft.meta[k] = parseByType('int', el.value);
       else state.draft.meta[k] = el.value;
+      if (k === 'horizonMin' && SGS.app && SGS.app._drawWinEditor) SGS.app._drawWinEditor();   // A1：H 改變立即重畫時窗編輯器
       return;
     }
     const p = el.dataset.path; if (!p) return;
     if (el.dataset.moveAntenna != null) return; // 換站在 change 處理
     setByPath(state.draft, p, parseByType(el.dataset.type || 'text', el.value));
-    if (/\.(start|end)$/.test(p) && SGS.app && SGS.app._drawWinEditor) SGS.app._drawWinEditor();
+    if (/\.(start|end|durMin|sat|station|id)$/.test(p) && SGS.app && SGS.app._drawWinEditor) SGS.app._drawWinEditor();   // A1：影響列標籤／範圍的欄位都重畫
   }
   // change（失焦／選單）：引用 id 或頻段改變 → 重建選單；天線換站
   function onDraftChange(e) {
@@ -573,7 +576,7 @@ self.onmessage = function (e) {
 
   // ---------- 排程分頁 ----------
   function initSched() {
-    $('#slotSel').addEventListener('click', (e) => { const b = e.target.closest('button[data-slot]'); if (!b) return; state.activeSlot = b.dataset.slot; saveLS(); renderSched(); });
+    $('#slotSel').addEventListener('click', (e) => { const b = e.target.closest('button[data-slot]'); if (!b) return; state.activeSlot = b.dataset.slot; cancelDrag(); saveLS(); syncPlay(); renderSched(); });
     $('#btnGanttPng').onclick = () => { $('#gantt').toBlob((blob) => downloadBlob('gantt.png', blob)); };
     window.addEventListener('resize', () => { if (!$('#tab-sched').classList.contains('hidden')) drawGantt(); });
   }
@@ -590,7 +593,20 @@ self.onmessage = function (e) {
         <div class="sub">總等待 ${s.score.totalWait} 分鐘 · objective ${s.score.objective.toFixed(4)} · ${s.feasible ? '<span style="color:var(--ok)">可行</span>' : '<span style="color:var(--bad)">不可行（' + s.violations.length + ' 條違規）</span>'}</div></div>`;
     }).join('');
     drawGantt(); drawAnim();
-    $('#playTime').textContent = state.norm ? E.minutesToHHMM(state.norm, Math.floor(state.play.t)) : '';
+    const vn = viewNorm();
+    $('#playTime').textContent = vn ? E.minutesToHHMM(vn, Math.floor(state.play.t)) : '';
+    const hint = $('#ganttHint');
+    if (hint) { const stale = isViewStale(); hint.classList.toggle('hidden', !stale); hint.textContent = stale ? '此解槽屬於舊版本資料，無法拖曳；請切換到目前版本的解槽，或重新求解。' : ''; }
+  }
+
+  // 播放／甘特／動畫共用的資料來源：選中的解槽之 norm；沒有解槽時用目前資料（B2）
+  function viewNorm() { const slot = state.slots[state.activeSlot]; return slot ? slot.norm : state.norm; }
+  function isViewStale() { const slot = state.slots[state.activeSlot]; return !!(slot && slot.revision !== state.revision); }
+  function syncPlay() {
+    const vn = viewNorm(); const H = vn ? vn.H : 100;
+    state.play.t = Math.max(0, Math.min(H, state.play.t));
+    const scrub = $('#playScrub'); if (scrub) scrub.value = (state.play.t / H * 100).toFixed(1);
+    const lab = $('#playTime'); if (lab) lab.textContent = vn ? E.minutesToHHMM(vn, Math.floor(state.play.t)) : '';
   }
 
   // 甘特圖幾何（可觀測，供測試核對）：回傳 {rows:[antennaId], blocks:[{req, antenna, start, end, calibEnd, x, y, w, h}]}
@@ -692,11 +708,16 @@ self.onmessage = function (e) {
   }
 
   // ---------- 甘特圖拖曳（§6）：操作一律落在「手動」解槽 ----------
-  function ensureManual() {
+  // 手動解槽的基底排程（ghost 可行性檢查與 ensureManual 共用同一定義，B1）
+  function manualBase() {
     const cur = state.slots[state.activeSlot];
+    if (cur && cur.revision === state.revision) return cur.schedule;
+    if (state.slots.manual && state.slots.manual.revision === state.revision) return state.slots.manual.schedule;
+    return [];
+  }
+  function ensureManual() {
     if (state.activeSlot === 'manual' && state.slots.manual && state.slots.manual.revision === state.revision) return state.slots.manual;
-    const base = cur && cur.revision === state.revision ? cur.schedule : (state.slots.manual && state.slots.manual.revision === state.revision ? state.slots.manual.schedule : []);
-    const slot = makeSlot(state.norm, state.data, clone(base), { source: 'manual', label: { kind: 'feas', text: '手動' }, basedOn: state.activeSlot }, state.revision);
+    const slot = makeSlot(state.norm, state.data, clone(manualBase()), { source: 'manual', label: { kind: 'feas', text: '手動' }, basedOn: state.activeSlot }, state.revision);
     state.slots.manual = slot; state.activeSlot = 'manual';
     return slot;
   }
@@ -707,52 +728,59 @@ self.onmessage = function (e) {
     setSlot('manual', makeSlot(state.norm, state.data, sched, { source: 'manual', label: { kind: 'feas', text: '手動' } }, state.revision));
     return state.slots.manual;
   }
-  function ganttPointToSlot(L, px, py) {
+  function ganttPointToSlot(L, px, py, H) {
     const ri = Math.floor((py - L.top) / L.rowH);
     const antenna = ri >= 0 && ri < L.rows.length ? L.rows[ri] : null;
-    const t = Math.round(((px - L.left) / L.plotW) * state.norm.H);
+    const t = Math.round(((px - L.left) / L.plotW) * H);
     return { antenna, t, inRows: antenna != null && px >= L.left && px <= L.left + L.plotW };
   }
   function initGanttDrag() {
     const canvas = $('#gantt');
     const tray = $('#ganttTray');
     const pos = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    // 拖曳只允許在「目前版本」上進行：選中解槽為舊版本時拒絕（B1）
+    const canDrag = () => !!state.norm && !isViewStale();
     const startDrag = (kind, req, offsetT, e) => {
-      state.drag = { kind, req, offsetT, ghost: null, lastY: 0 };
+      if (!canDrag() || !state.norm.reqById.has(req)) { state.dragRefused = { kind, req, reason: isViewStale() ? 'stale-slot' : 'unknown-request' }; renderSched(); return; }
+      state.dragRefused = null;
+      state.drag = { kind, req, offsetT, ghost: null, lastY: 0, revision: state.revision };   // 記住起始版本
       canvas.classList.add('dragging');
       moveDrag(e);
     };
     const moveDrag = (e) => {
-      const d = state.drag; if (!d || !state.norm) return;
+      const d = state.drag; if (!d) return;
+      if (d.revision !== state.revision || !state.norm) { cancelDrag(); return; }   // 版本已變 → 拖曳作廢
       const L = state.lastGanttLayout; if (!L) return;
       const p = pos(e); d.lastY = p.y;
       const r = state.norm.reqById.get(d.req);
-      const { antenna, t } = ganttPointToSlot(L, p.x, p.y);
+      if (!r) { cancelDrag(); return; }
+      const { antenna, t } = ganttPointToSlot(L, p.x, p.y, state.norm.H);
       const start = Math.max(0, Math.min(state.norm.H - r.durMin, t - d.offsetT));
       const overTray = e.target === tray || tray.contains(e.target);
       tray.classList.toggle('over', overTray);
       if (overTray || !antenna) { d.ghost = null; drawGantt(); return; }
-      const slot = state.slots[state.activeSlot];
-      const base = (state.activeSlot === 'manual' && slot && slot.revision === state.revision ? slot.schedule : ((slot && slot.revision === state.revision) ? slot.schedule : [])).filter((it) => it.req !== d.req);
+      const base = manualBase().filter((it) => it.req !== d.req);   // 與 ensureManual 同一基底
       const ok = E.checkFeasible(state.norm, base.concat([{ req: d.req, antenna, start }])).ok;
       d.ghost = { req: d.req, antenna, start, ok };
       drawGantt();
     };
     const endDrag = (e) => {
       const d = state.drag; if (!d) return;
+      if (d.revision !== state.revision || !state.norm || !state.norm.reqById.has(d.req)) { cancelDrag(); return; }
       const overTray = e && (e.target === tray || tray.contains(e.target));
       state.drag = null; canvas.classList.remove('dragging'); tray.classList.remove('over');
       if (overTray) { setManualTask(d.req, null, null); return; }
       if (d.ghost) setManualTask(d.ghost.req, d.ghost.antenna, d.ghost.start); else drawGantt();
     };
     canvas.addEventListener('pointerdown', (e) => {
-      if (!state.norm || !state.lastGanttLayout) return;
+      if (!state.lastGanttLayout) return;
       const p = pos(e);
       const hits = state.lastGanttLayout.blocks.filter((bl) => p.x >= bl.x && p.x <= bl.x + bl.w && p.y >= bl.y && p.y <= bl.y + bl.h);
       const b = hits[hits.length - 1];   // 重疊時取最後繪製（最上層）的區塊
       if (!b) return;
       e.preventDefault();
-      const tAt = ((p.x - state.lastGanttLayout.left) / state.lastGanttLayout.plotW) * state.norm.H;
+      const vn = viewNorm();
+      const tAt = ((p.x - state.lastGanttLayout.left) / state.lastGanttLayout.plotW) * vn.H;
       startDrag('block', b.req, Math.round(tAt - b.start), e);
     });
     $('#trayChips').addEventListener('pointerdown', (e) => {
@@ -762,6 +790,16 @@ self.onmessage = function (e) {
     });
     window.addEventListener('pointermove', (e) => { if (state.drag) moveDrag(e); });
     window.addEventListener('pointerup', (e) => { if (state.drag) endDrag(e); });
+    window.addEventListener('pointercancel', () => { if (state.drag) cancelDrag(); });
+  }
+  // 放棄進行中的拖曳：不寫入任何解槽、清 ghost 與樣式（commit / pointercancel / 版本變更時呼叫）
+  function cancelDrag() {
+    if (!state.drag) return;
+    state.drag = null;
+    const canvas = $('#gantt'), tray = $('#ganttTray');
+    if (canvas) canvas.classList.remove('dragging');
+    if (tray) tray.classList.remove('over');
+    drawGantt();
   }
 
   // ---------- 播放控制 + 動畫（§6） ----------
@@ -773,16 +811,15 @@ self.onmessage = function (e) {
   function initPlayback() {
     $('#btnPlay').onclick = () => (state.play.playing ? pausePlay() : startPlay());
     $('#playSpeed').onchange = () => { state.play.speed = Number($('#playSpeed').value) || 1; };
-    $('#playScrub').oninput = () => { const H = state.norm ? state.norm.H : 100; setTime(Number($('#playScrub').value) / 100 * H); };
+    $('#playScrub').oninput = () => { const vn = viewNorm(); const H = vn ? vn.H : 100; setTime(Number($('#playScrub').value) / 100 * H); };
     $('#showResidual').onchange = () => drawAnim();
     $('#btnAnimPng').onclick = () => { $('#anim').toBlob((blob) => downloadBlob('animation-frame.png', blob)); };
     window.addEventListener('resize', () => { if (!$('#tab-sched').classList.contains('hidden')) drawAnim(); });
   }
   function setTime(t) {
-    const H = state.norm ? state.norm.H : 100;
+    const vn = viewNorm(); const H = vn ? vn.H : 100;
     state.play.t = Math.max(0, Math.min(H, t));
-    $('#playScrub').value = (state.play.t / H * 100).toFixed(1);
-    $('#playTime').textContent = state.norm ? E.minutesToHHMM(state.norm, Math.floor(state.play.t)) : '';
+    syncPlay();
     drawGantt(); drawAnim();
   }
   function startPlay() {
@@ -792,8 +829,8 @@ self.onmessage = function (e) {
       if (state.play.last != null) {
         const dt = (ts - state.play.last) / 1000;             // 秒
         let t = state.play.t + dt * state.play.speed;        // 1× = 每秒 1 分鐘
-        const H = state.norm ? state.norm.H : 100;
-        if (t > H) t = 0;                                     // 循環
+        const vn = viewNorm(); const H = vn ? vn.H : 100;
+        if (t > H) t = 0;                                     // 循環（以播放資料來源的 H 為準）
         setTime(t);
       }
       state.play.last = ts;
@@ -801,7 +838,7 @@ self.onmessage = function (e) {
     };
     state.play.raf = requestAnimationFrame(step);
   }
-  function pausePlay() { state.play.playing = false; if (state.play.raf) cancelAnimationFrame(state.play.raf); state.play.raf = null; $('#btnPlay').textContent = '▶ 播放'; }
+  function pausePlay() { state.play.playing = false; if (state.play.raf) cancelAnimationFrame(state.play.raf); state.play.raf = null; state.play.last = null; const b = $('#btnPlay'); if (b) b.textContent = '▶ 播放'; }
   function drawAnim() {
     const canvas = $('#anim'); if (!canvas) return;
     const slot = state.slots[state.activeSlot];
@@ -941,7 +978,7 @@ self.onmessage = function (e) {
     showTab, loadData, importJSONText, applyDraft, solveMILP, cancelSolve, setSlot, makeSlot, renderSched, ganttLayout,
     runGA, cancelGA, readGaParams, writeGaParams, validateGaParams, csvCurves, csvStats, csvSchedule, gaReference,
     _setWorkerFactory: (fn) => { workerFactory = fn; },
-    setTime, startPlay, pausePlay, setManualTask, ensureManual, drawAnim, getFit,
+    setTime, startPlay, pausePlay, setManualTask, ensureManual, manualBase, viewNorm, isViewStale, cancelDrag, drawAnim, getFit,
     getDraft: () => state.draft,
     _setGLPKFactory: (fn) => { destroyGLPK(); glpkFactory = fn; },
     _glpkDebug: () => ({ inst: glpkInst, pending: !!glpkPromise, gen: glpkGen }),

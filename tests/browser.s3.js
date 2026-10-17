@@ -126,6 +126,108 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
       await page.click('#btnRevert');
       await page.screenshot({ path: path.join(OUT, 's3-data-editor.png') });
     });
+    await step('B1: drag on a stale-revision slot is refused (hint shown, no slot write, no error even if the request was deleted)', async () => {
+      // 刪掉 R1 後套用 → 新版本；MILP 解槽（舊版本）仍畫出 R1 區塊，拖它不得拋錯、不得寫入任何解槽
+      await page.evaluate(() => { const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.requests = d.requests.filter((r) => r.id !== 'R1'); SGS.app.loadData(d); SGS.app.showTab('sched'); SGS.app.state.activeSlot = 'milp'; SGS.app.renderSched(); });
+      const before = await page.evaluate(() => ({ rev: SGS.app.state.revision, milpRev: SGS.app.state.slots.milp.revision, slots: JSON.stringify(Object.fromEntries(Object.entries(SGS.app.state.slots).map(([k, v]) => [k, v && [v.revision, v.schedule]]))), hasR1: SGS.app.state.lastGanttLayout.blocks.some((b) => b.req === 'R1'), stale: SGS.app.isViewStale() }));
+      assert.ok(before.milpRev < before.rev && before.hasR1 && before.stale, JSON.stringify(before));
+      const from = await blockCenter('R1'); const to = await rowPoint('GS_2-S', 10);
+      await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move(to.x, to.y, { steps: 6 });
+      const mid = await page.evaluate(() => ({ drag: SGS.app.state.drag, refused: SGS.app.state.dragRefused, dragging: document.getElementById('gantt').classList.contains('dragging'), hint: document.getElementById('ganttHint').textContent, hintHidden: document.getElementById('ganttHint').classList.contains('hidden') }));
+      await page.mouse.up();
+      assert.strictEqual(mid.drag, null); assert.ok(mid.refused && mid.refused.req === 'R1' && mid.refused.reason === 'stale-slot', JSON.stringify(mid.refused));
+      assert.strictEqual(mid.dragging, false); assert.ok(!mid.hintHidden && /舊版本/.test(mid.hint));
+      // 托盤 chip 同樣拒絕
+      const chipSel = await page.evaluate(() => { const c = document.querySelector('[data-chip]'); return c ? c.dataset.chip : null; });
+      if (chipSel) {
+        const chip = await page.evaluate((id) => { const b = document.querySelector(`[data-chip="${id}"]`).getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }, chipSel);
+        await page.mouse.move(chip.x, chip.y); await page.mouse.down(); await page.mouse.move(to.x, to.y, { steps: 4 }); await page.mouse.up();
+      }
+      const after = await page.evaluate(() => ({ active: SGS.app.state.activeSlot, slots: JSON.stringify(Object.fromEntries(Object.entries(SGS.app.state.slots).map(([k, v]) => [k, v && [v.revision, v.schedule]]))) }));
+      assert.strictEqual(after.active, 'milp'); assert.strictEqual(after.slots, before.slots, 'no slot written');
+      assert.deepStrictEqual(errs, []);
+    });
+    await step('B1: commit during a drag cancels it (no write on pointerup); pointercancel also clears the drag; ghost base == ensureManual base', async () => {
+      // 以目前版本建立手動解槽（空排程），從托盤拖 R5 → 拖曳中提交資料 → 放開不得寫入
+      await page.evaluate(() => { SGS.app.setSlot('manual', SGS.app.makeSlot(SGS.app.state.norm, SGS.app.state.data, [], { source: 'manual', label: { kind: 'feas', text: '手動' } }, SGS.app.state.revision)); SGS.app.state.activeSlot = 'manual'; SGS.app.renderSched(); });
+      let chip = await page.evaluate(() => { const b = document.querySelector('[data-chip="R5"]').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+      let to = await rowPoint('GS_1-S', 24);
+      await page.mouse.move(chip.x, chip.y); await page.mouse.down(); await page.mouse.move(to.x, to.y, { steps: 6 });
+      const g = await page.evaluate(() => { const d = SGS.app.state.drag; const base = SGS.app.manualBase(); return { rev: d && d.revision, ghost: d && d.ghost, baseLen: base.length, sameAsSlot: base === SGS.app.state.slots.manual.schedule }; });
+      assert.ok(g.ghost && g.ghost.req === 'R5' && g.ghost.ok === true, JSON.stringify(g)); assert.strictEqual(g.baseLen, 0); assert.ok(g.sameAsSlot);
+      const revBefore = await page.evaluate(() => SGS.app.state.revision);
+      await page.evaluate(() => { SGS.app.loadData(JSON.parse(JSON.stringify(SGS.app.state.data))); });   // 提交 → 新版本
+      const afterCommit = await page.evaluate(() => ({ drag: SGS.app.state.drag, dragging: document.getElementById('gantt').classList.contains('dragging'), rev: SGS.app.state.revision }));
+      assert.strictEqual(afterCommit.drag, null); assert.strictEqual(afterCommit.dragging, false); assert.strictEqual(afterCommit.rev, revBefore + 1);
+      await page.mouse.move(to.x + 3, to.y); await page.mouse.up();
+      const r = await page.evaluate(() => ({ manualRev: SGS.app.state.slots.manual.revision, hasR5: SGS.app.state.slots.manual.schedule.some((x) => x.req === 'R5'), rev: SGS.app.state.revision }));
+      assert.ok(r.manualRev === r.rev - 1 && !r.hasR5, 'stale drag must not write: ' + JSON.stringify(r));
+      // pointercancel：在目前版本上開始拖曳，再送 pointercancel → drag 清空、不寫入
+      await page.evaluate(() => { SGS.app.setSlot('manual', SGS.app.makeSlot(SGS.app.state.norm, SGS.app.state.data, [], { source: 'manual', label: { kind: 'feas', text: '手動' } }, SGS.app.state.revision)); SGS.app.state.activeSlot = 'manual'; SGS.app.renderSched(); });
+      chip = await page.evaluate(() => { const b = document.querySelector('[data-chip="R5"]').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+      await page.mouse.move(chip.x, chip.y); await page.mouse.down(); await page.mouse.move(to.x, to.y, { steps: 4 });
+      const pc = await page.evaluate(() => { const had = !!SGS.app.state.drag; window.dispatchEvent(new Event('pointercancel')); return { had, drag: SGS.app.state.drag, dragging: document.getElementById('gantt').classList.contains('dragging'), over: document.getElementById('ganttTray').classList.contains('over') }; });
+      await page.mouse.up();
+      assert.ok(pc.had); assert.strictEqual(pc.drag, null); assert.strictEqual(pc.dragging, false); assert.strictEqual(pc.over, false);
+      const r2 = await page.evaluate(() => SGS.app.state.slots.manual.schedule.length);
+      assert.strictEqual(r2, 0, 'pointercancel must not write');
+      assert.deepStrictEqual(errs, []);
+    });
+    await step('B2: playback source == selected slot norm (H, time origin); re-clamp + scrub sync on slot switch and commit; commit pauses', async () => {
+      // 目前版本 H=40；改成 H=80、時間原點 08:00 並提交；舊版本 MILP 解槽（H=40）仍以自己的 H/原點播放
+      await page.evaluate(() => { const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.meta.horizonMin = 80; d.meta.timeOrigin = '08:00'; SGS.app.loadData(d); SGS.app.showTab('sched'); SGS.app.state.activeSlot = 'milp'; SGS.app.renderSched(); });
+      let r = await page.evaluate(() => { SGS.app.setTime(60); return { t: SGS.app.state.play.t, scrub: Number(document.getElementById('playScrub').value), label: document.getElementById('playTime').textContent, H: SGS.app.viewNorm().H, cur: SGS.app.state.norm.H }; });
+      assert.deepStrictEqual([r.H, r.cur, r.t, r.scrub, r.label], [40, 80, 40, 100, '10:40'], JSON.stringify(r));
+      r = await page.evaluate(() => { const s = document.getElementById('playScrub'); s.value = '50'; s.dispatchEvent(new Event('input')); return { t: SGS.app.state.play.t, label: document.getElementById('playTime').textContent, anim: SGS.app.state.lastAnim.t }; });
+      assert.deepStrictEqual([r.t, r.label, r.anim], [20, '10:20', 20]);
+      // 切到沒有解槽的槽位（→ 目前資料 H=80，原點 08:00）：t 保持 20、拉桿改為 25%、標籤用新原點
+      r = await page.evaluate(() => { document.querySelector('#slotSel button[data-slot="ga"]') && (SGS.app.state.slots.ga = null); document.querySelector('#slotSel button[data-slot="ga"]').click(); return { active: SGS.app.state.activeSlot, t: SGS.app.state.play.t, scrub: Number(document.getElementById('playScrub').value), label: document.getElementById('playTime').textContent, H: SGS.app.viewNorm().H }; });
+      assert.deepStrictEqual([r.active, r.H, r.t, r.scrub, r.label], ['ga', 80, 20, 25, '08:20'], JSON.stringify(r));
+      // t=70 在 H=80 下合法；切回 MILP（H=40）→ 夾到 40、拉桿 100
+      r = await page.evaluate(() => { SGS.app.setTime(70); document.querySelector('#slotSel button[data-slot="milp"]').click(); return { t: SGS.app.state.play.t, scrub: Number(document.getElementById('playScrub').value), label: document.getElementById('playTime').textContent }; });
+      assert.deepStrictEqual([r.t, r.scrub, r.label], [40, 100, '10:40'], JSON.stringify(r));
+      // 受控時戳：以 stub rAF 驗證 1×=每秒 1 分鐘、循環以解槽 H=40 為準、暫停後重播不跳動
+      r = await page.evaluate(() => {
+        const raf0 = window.requestAnimationFrame, caf0 = window.cancelAnimationFrame; const cbs = [];
+        window.requestAnimationFrame = (f) => { cbs.push(f); return cbs.length; }; window.cancelAnimationFrame = () => {};
+        const tick = (ts) => { const f = cbs.shift(); f(ts); return SGS.app.state.play.t; };
+        try {
+          SGS.app.setTime(39); document.getElementById('playSpeed').value = '1'; document.getElementById('playSpeed').dispatchEvent(new Event('change'));
+          SGS.app.startPlay();
+          const a = tick(1000), b = tick(1500), c = tick(2200);      // 39 → 39.5 → (40.2 > 40) 0
+          const scrubC = Number(document.getElementById('playScrub').value), labelC = document.getElementById('playTime').textContent;
+          SGS.app.pausePlay(); const last = SGS.app.state.play.last, raf = SGS.app.state.play.raf; cbs.length = 0;
+          SGS.app.setTime(10); SGS.app.startPlay();
+          const d = tick(9000), e = tick(9250);                        // 重播：第一幀不跳、第二幀 +0.25
+          SGS.app.pausePlay();
+          return { a, b, c, scrubC, labelC, last, raf, d, e, playing: SGS.app.state.play.playing };
+        } finally { window.requestAnimationFrame = raf0; window.cancelAnimationFrame = caf0; }
+      });
+      assert.deepStrictEqual([r.a, r.b, r.c, r.scrubC, r.labelC], [39, 39.5, 0, 0, '10:00'], JSON.stringify(r));
+      assert.strictEqual(r.last, null); assert.strictEqual(r.raf, null);
+      assert.deepStrictEqual([r.d, r.e, r.playing], [10, 10.25, false]);
+      // 提交資料 → 播放暫停、rAF/last 清空、t 依播放來源重新夾住
+      r = await page.evaluate(() => { SGS.app.startPlay(); const was = SGS.app.state.play.playing; SGS.app.loadData(JSON.parse(JSON.stringify(SGS.app.state.data))); return { was, playing: SGS.app.state.play.playing, raf: SGS.app.state.play.raf, last: SGS.app.state.play.last, btn: document.getElementById('btnPlay').textContent, t: SGS.app.state.play.t, scrub: Number(document.getElementById('playScrub').value) }; });
+      assert.ok(r.was); assert.strictEqual(r.playing, false); assert.strictEqual(r.raf, null); assert.strictEqual(r.last, null); assert.ok(/播放/.test(r.btn));
+      assert.ok(r.t <= 40 && Math.abs(r.scrub - r.t / 40 * 100) < 0.1, JSON.stringify(r));
+      assert.deepStrictEqual(errs, []);
+    });
+    await step('A1: editing H or a row label in the data tab redraws the window editor immediately', async () => {
+      await page.evaluate(() => { SGS.app.loadData(JSON.parse(JSON.stringify(SGS.app.state.data))); SGS.app.showTab('data'); });
+      await page.click('#btnLoadDefault');
+      const r = await page.evaluate(() => {
+        const h0 = SGS.app.state.lastWinEditor.H;
+        const orig = SGS.app._drawWinEditor; let n = 0; SGS.app._drawWinEditor = () => { n++; orig(); };
+        try {
+          const inp = document.querySelector('input[data-meta="horizonMin"]'); inp.value = '60'; inp.dispatchEvent(new Event('input', { bubbles: true }));
+          const h1 = SGS.app.state.lastWinEditor.H, n1 = n;
+          const idIn = document.querySelector('input[data-path="requests[0].id"]'); idIn.value = 'R1x'; idIn.dispatchEvent(new Event('input', { bubbles: true }));
+          return { h0, h1, n1, n2: n, draftId: SGS.app.getDraft().requests[0].id };
+        } finally { SGS.app._drawWinEditor = orig; }
+      });
+      assert.deepStrictEqual([r.h0, r.h1, r.n1, r.n2, r.draftId], [40, 60, 1, 2, 'R1x'], JSON.stringify(r));
+      await page.click('#btnRevert');
+    });
     await step('residual toggle + PNG export produce a frame', async () => {
       await page.evaluate(() => SGS.app.showTab('sched'));
       const r = await page.evaluate(() => { document.getElementById('showResidual').checked = false; document.getElementById('showResidual').dispatchEvent(new Event('change')); const len = document.getElementById('anim').toDataURL('image/png').length; document.getElementById('showResidual').checked = true; SGS.app.drawAnim(); return { len, res: SGS.app.state.lastAnim.fit.residuals }; });
