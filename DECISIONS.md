@@ -98,3 +98,15 @@
 |---|---|---|
 | 錯誤訊息格式化 | 所有來自輸入的值一律經 `engine.fmt()`，不對物件呼叫 String() | N1：`{"toString":null}` 會讓 String() 拋錯 |
 | 工作環境 | PO 決定暫時維持 Cowork（雲端工作區 + GitHub）方式；Claude Code CLI 本機環境待權限問題解決後再評估 | 工作機 PowerShell 執行政策與無 Node |
+
+## 2026-10-17 S2 實作期間
+| 項目 | 決定 | 原因 |
+|---|---|---|
+| GA 執行位置 | Blob worker 內嵌 build 時注入的 engine.js/ga.js 原始碼字串（`window.SGS_SOURCES`），主頁與 worker 同一份規則 | SPEC §3、§7（不在 worker 重寫規則） |
+| GA 閘門 | 獨立 `gateGA`（與 MILP 同語意）；commit 同時重設兩者並終止 worker | §4.2 第 6 點共用規則 |
+| GA 解槽 | 多次 run 取最佳可行 phenotype；再過一次 checkFeasible 才寫槽 | §5.3、§6 |
+| 命中參考 | 只有同版本的 MILP 解槽才作參考；`opt` 稱「命中最佳率」，`feas` 稱「命中 MILP incumbent 率」；無參考只列 GA 自身統計 | §5.3 |
+| 進度回報 | 每 ⌈G/50⌉ 代 postMessage 一次 | 避免訊息洪水 |
+| 產生器 | 參數：seed、衛星數、站數、每站天線數、需求數、時窗密度、H、校準；每衛星至少一段時窗；需求時窗錨定在該衛星某段 visibility 附近 | §3 |
+| 直接編碼起始突變 | 在該天線的 feasibleStarts 索引上 ±2 步移動 | 避免產生明顯時窗外的起始 |
+| C1 | 測試 waitFor 加逾時 | S1-r3 建議 |

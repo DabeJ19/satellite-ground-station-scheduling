@@ -13,11 +13,13 @@
     data: null, norm: null, revision: 0, // 已提交（通過驗證）的版本
     slots: { manual: null, milp: null, ga: null }, // {schedule, score, feasible, violations, revision, norm, data, meta}
     activeSlot: 'milp',
-    settings: { tmlim: 30 },
+    settings: { tmlim: 30, ga: {} },
     solving: false,
     storageWarned: false,
+    ga: { running: false, worker: null, results: [], curves: [], summary: null, mode: null, norm: null, revision: null },
   };
   const gate = M.createGate();
+  const gateGA = M.createGate();
 
   // ---------- GLPK 初始化 ownership（B4） ----------
   // single-flight promise + 世代號：cancel 會遞增世代，過期初始化完成後自行 terminate，不覆寫現用實例。
@@ -65,10 +67,12 @@
     let norm;
     try { norm = E.normalize(data); } catch (e) { return { ok: false, errors: (e && e.errors) || [{ path: '', msg: '正規化失敗：' + (e && e.message) }] }; }
     cancelSolve();
+    cancelGA();
     state.data = clone(data);
     state.norm = norm;
     state.revision = (opts.revision != null) ? opts.revision : state.revision + 1;
     gate.setRevision(state.revision);
+    gateGA.setRevision(state.revision);
     state.draft = clone(state.data);
     saveLS();
     renderAll();
@@ -97,6 +101,7 @@
     $('#tabs').querySelectorAll('button').forEach((x) => x.classList.toggle('active', x.dataset.tab === name));
     document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('hidden', s.id !== 'tab-' + name));
     if (name === 'sched') renderSched();
+    if (name === 'ga') drawGaChart();
   }
 
   // ---------- 資料分頁 ----------
@@ -111,6 +116,12 @@
       fr.readAsText(f); e.target.value = '';
     };
     $('#btnRevert').onclick = () => { state.draft = clone(state.data); renderDataTab(); showErrors(null); };
+    $('#btnGenerate').onclick = () => {
+      const o = {};
+      document.querySelectorAll('[data-gen]').forEach((el) => { o[el.dataset.gen] = Number(el.value); });
+      const d = E.generateInstance(o.seed | 0, o);
+      loadData(d);
+    };
     $('#btnApply').onclick = () => applyDraft();
     document.querySelectorAll('button[data-add]').forEach((b) => b.onclick = () => addRow(b.dataset.add));
     const tab = $('#tab-data');
@@ -313,6 +324,204 @@
   }
   const fmtMs = (ms) => ms == null ? '—' : (ms < 1000 ? ms.toFixed(0) + ' ms' : (ms / 1000).toFixed(2) + ' s');
 
+  // ---------- GA 實驗分頁（§5.3；Blob worker，內嵌同一份 engine/ga 原始碼） ----------
+  const WORKER_MAIN = `
+self.onmessage = function (e) {
+  var m = e.data; if (!m || m.cmd !== 'run') return;
+  try {
+    var norm = SGS.engine.normalize(m.data);
+    var results = [];
+    for (var i = 0; i < m.seeds.length; i++) {
+      var seed = m.seeds[i];
+      var res = SGS.ga.run(norm, Object.assign({}, m.params, { seed: seed }), { onGeneration: function (info) {
+        if (info.gen % m.progressEvery === 0) postMessage({ type: 'progress', runId: m.runId, revision: m.revision, runIndex: i, gen: info.gen, best: info.best, avg: info.avg, bestScore: info.bestScore });
+      } });
+      var r = { seed: seed, best: res.best, bestGen: res.bestGen, generations: res.generations, stopReason: res.stopReason, history: res.history, elapsedMs: res.elapsedMs, params: res.params };
+      results.push(r);
+      postMessage({ type: 'run-done', runId: m.runId, revision: m.revision, runIndex: i, result: r });
+    }
+    postMessage({ type: 'done', runId: m.runId, revision: m.revision, results: results });
+  } catch (err) { postMessage({ type: 'error', runId: m.runId, revision: m.revision, error: String(err && err.message || err) }); }
+};`;
+  let workerUrl = null;
+  function makeWorker() {
+    if (!workerUrl) {
+      const src = (root.SGS_SOURCES && root.SGS_SOURCES.engine) ? root.SGS_SOURCES.engine + '\n' + root.SGS_SOURCES.ga + '\n' + WORKER_MAIN : null;
+      if (!src) throw new Error('worker 原始碼未內嵌（需經 build.js）');
+      workerUrl = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+    }
+    return new Worker(workerUrl);
+  }
+
+  function readGaParams() {
+    const p = {};
+    document.querySelectorAll('[data-ga]').forEach((el) => {
+      const k = el.dataset.ga;
+      if (k === 'encoding' || k === 'directMode') p[k] = el.value;
+      else if (k === 'lambda') p[k] = el.value.trim() === '' ? null : Number(el.value);
+      else p[k] = Number(el.value);
+    });
+    return p;
+  }
+  function writeGaParams(p) {
+    document.querySelectorAll('[data-ga]').forEach((el) => { const k = el.dataset.ga; if (p[k] != null) el.value = p[k]; });
+  }
+  function initGA() {
+    $('#btnGaOne').onclick = () => runGA(1);
+    $('#btnGaMulti').onclick = () => runGA(Math.max(1, readGaParams().runs | 0));
+    $('#btnGaCancel').onclick = () => { cancelGA(); setGaStatus('<span class="badge bad">已取消</span>'); };
+    $('#btnGaCsvCurve').onclick = () => download('ga-curves.csv', csvCurves(), 'text/csv');
+    $('#btnGaCsvStats').onclick = () => download('ga-stats.csv', csvStats(), 'text/csv');
+    $('#btnGaCsvSched').onclick = () => download('ga-schedule.csv', csvSchedule(state.slots.ga), 'text/csv');
+    document.querySelectorAll('[data-ga]').forEach((el) => el.addEventListener('change', () => { state.settings.ga = readGaParams(); saveLS(); }));
+    if (state.settings.ga) writeGaParams(state.settings.ga);
+    window.addEventListener('resize', () => { if (!$('#tab-ga').classList.contains('hidden')) drawGaChart(); });
+  }
+  function setGaStatus(html) { $('#gaStatus').innerHTML = html; }
+  function cancelGA() {
+    gateGA.cancel();
+    if (state.ga.worker) { try { state.ga.worker.terminate(); } catch (_) {} state.ga.worker = null; }
+    state.ga.running = false;
+    $('#btnGaOne').disabled = false; $('#btnGaMulti').disabled = false; $('#btnGaCancel').disabled = true;
+  }
+
+  // 回傳 Promise<results|null>（null = 取消或過期）
+  function runGA(runs) {
+    if (!state.norm) return Promise.resolve(null);
+    cancelGA();
+    const params = readGaParams(); state.settings.ga = params; saveLS();
+    const norm = state.norm, data = state.data, revision = state.revision;   // 快照
+    const runId = gateGA.begin(revision);
+    const seeds = SGS.ga.runSeeds(params.seed >>> 0, runs);
+    const progressEvery = Math.max(1, Math.floor((params.generations || 200) / 50));
+    state.ga = Object.assign(state.ga, { running: true, results: [], curves: [], summary: null, mode: runs > 1 ? 'multi' : 'single', norm, data, revision, params, seeds, runId });
+    $('#btnGaOne').disabled = true; $('#btnGaMulti').disabled = true; $('#btnGaCancel').disabled = false;
+    setGaStatus(`<span class="badge run">執行中…</span> 版本 r${revision}，${runs} 次 run，seeds ${seeds[0]}..${seeds[seeds.length - 1]}`);
+    $('#gaResult').innerHTML = '<span class="muted">執行中…</span>';
+    let worker;
+    try { worker = makeWorker(); } catch (err) { cancelGA(); setGaStatus(`<span class="badge bad">無法建立 worker</span> ${esc(err.message)}`); return Promise.resolve(null); }
+    state.ga.worker = worker;
+    return new Promise((resolve) => {
+      worker.onmessage = (e) => {
+        const m = e.data;
+        if (!gateGA.accepts(m)) return;                                   // 版本閘門：過期／取消的訊息全部丟棄
+        if (m.type === 'progress') {
+          setGaStatus(`<span class="badge run">執行中…</span> run ${m.runIndex + 1}/${seeds.length}，第 ${m.gen} 代，目前最佳 Z=${m.bestScore.assigned} W=${m.bestScore.totalWait}`);
+          return;
+        }
+        if (m.type === 'run-done') {
+          state.ga.results.push(m.result);
+          state.ga.curves = state.ga.results.map((r) => r.history);
+          drawGaChart();
+          return;
+        }
+        if (m.type === 'error') { cancelGA(); setGaStatus(`<span class="badge bad">GA 錯誤</span> ${esc(m.error)}`); resolve(null); return; }
+        if (m.type === 'done') {
+          state.ga.worker = null; state.ga.running = false;
+          $('#btnGaOne').disabled = false; $('#btnGaMulti').disabled = false; $('#btnGaCancel').disabled = true;
+          finishGA(m.results, norm, data, revision);
+          resolve(m.results);
+        }
+      };
+      worker.onerror = (err) => { if (!gateGA.accepts({ revision, runId })) return; cancelGA(); setGaStatus(`<span class="badge bad">worker 失敗</span> ${esc(err.message || err)}`); resolve(null); };
+      worker.postMessage({ cmd: 'run', data, params, seeds, runId, revision, progressEvery });
+    });
+  }
+
+  function gaReference() {
+    const m = state.slots.milp;
+    if (!m || m.revision !== state.revision || !m.feasible) return null;
+    return { score: m.score, proven: !!(m.meta && m.meta.label && m.meta.label.kind === 'opt') };
+  }
+  function finishGA(results, norm, data, revision) {
+    state.ga.results = results; state.ga.curves = results.map((r) => r.history);
+    const ref = gaReference();
+    const summary = SGS.ga.summarize(results, ref);
+    state.ga.summary = summary;
+    const bestRun = results[summary.bestRunIndex];
+    // GA 解槽：所有 run 的最佳可行 phenotype（再過一次 checkFeasible）
+    const fe = E.checkFeasible(norm, bestRun.best.schedule);
+    if (fe.ok) setSlot('ga', makeSlot(norm, data, bestRun.best.schedule, { source: 'GA', label: { kind: 'feas', text: `GA 最佳（${results.length} run）` }, params: state.ga.params, seed: bestRun.seed, bestGen: bestRun.best.gen }, revision));
+    setGaStatus(`<span class="badge opt">完成</span> 版本 r${revision}，${results.length} 次 run`);
+    renderGaResult(summary, results, ref);
+    drawGaChart();
+  }
+
+  function renderGaResult(s, results, ref) {
+    const f = (x, d) => (x == null ? 'N/A' : (typeof x === 'number' ? x.toFixed(d == null ? 2 : d) : x));
+    let html = `<div class="kv">
+      <div>最佳 Z<b>${s.bestZ}</b></div><div>最佳解總等待<b>${s.bestW}</b></div>
+      <div>平均 Z<b>${f(s.meanZ)}</b></div><div>Z 樣本標準差<b>${f(s.sdZ, 3)}</b></div>
+      <div>平均總等待<b>${f(s.meanW)}</b></div><div>平均世代數<b>${f(s.meanGenerations, 1)}</b></div>
+      <div>平均耗時<b>${f(s.meanMs, 0)} ms</b></div>`;
+    if (ref) {
+      const name = ref.proven ? '命中最佳率' : '命中 MILP incumbent 率';
+      html += `<div>${name}（Z*）<b>${s.hitZ}/${s.runs}</b></div><div>${name}（Z*,W*）<b>${s.hitZW}/${s.runs}</b></div>
+        <div>平均達最佳世代（命中者）<b>${f(s.meanGenToHit, 1)}</b></div><div>未命中數<b>${s.missZW}</b></div>`;
+      html += `</div><p class="muted small">參考：MILP ${ref.proven ? '已證明最佳' : '未證明最佳（incumbent）'} (Z*, W*) = (${ref.score.assigned}, ${ref.score.totalWait})，版本 r${state.revision}。${ref.proven ? '' : '未證明最佳時只報對 incumbent 的差距，不稱最佳命中率。'}</p>`;
+    } else html += `</div><p class="muted small">目前版本沒有可比較的 MILP 解（先在「模型」分頁求解），只列 GA 自身統計。</p>`;
+    html += `<table class="stats"><thead><tr><th>#</th><th>seed</th><th>Z</th><th>W</th><th>objective</th><th>達最佳世代</th><th>世代數</th><th>停止原因</th><th>ms</th></tr></thead><tbody>` +
+      results.map((r, i) => `<tr><td>${i + 1}</td><td>${r.seed}</td><td>${r.best.score.assigned}</td><td>${r.best.score.totalWait}</td><td>${r.best.score.objective.toFixed(4)}</td><td>${r.best.gen}</td><td>${r.generations}</td><td>${esc(r.stopReason)}</td><td>${Math.round(r.elapsedMs)}</td></tr>`).join('') + '</tbody></table>';
+    $('#gaResult').innerHTML = html;
+  }
+
+  function drawGaChart() {
+    const canvas = $('#gaChart'); if (!canvas) return;
+    const curves = state.ga.curves || [];
+    const dpr = window.devicePixelRatio || 1, cssW = canvas.clientWidth || 600, cssH = 260;
+    canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr); canvas.style.height = cssH + 'px';
+    const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+    const cs = getComputedStyle(document.documentElement); const C = (n) => cs.getPropertyValue(n).trim();
+    ctx.clearRect(0, 0, cssW, cssH);
+    $('#gaCurveTitle').textContent = curves.length ? `（${curves.length} 次 run，每代 best／avg fitness）` : '';
+    if (!curves.length) { ctx.fillStyle = C('--muted'); ctx.font = '13px system-ui'; ctx.fillText('尚無資料', 20, 30); return; }
+    const L = 48, R = 12, T = 12, B = 28;
+    const maxGen = Math.max(...curves.map((h) => h.length));
+    let lo = Infinity, hi = -Infinity;
+    curves.forEach((h) => h.forEach((p) => { lo = Math.min(lo, p.avg, p.best); hi = Math.max(hi, p.avg, p.best); }));
+    if (!Number.isFinite(lo)) { lo = 0; hi = 1; } if (hi - lo < 1e-9) { hi = lo + 1; }
+    const x = (g) => L + ((g - 1) / Math.max(1, maxGen - 1)) * (cssW - L - R);
+    const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (cssH - T - B);
+    ctx.strokeStyle = C('--grid'); ctx.lineWidth = 1; ctx.font = '11px system-ui'; ctx.fillStyle = C('--muted');
+    for (let i = 0; i <= 4; i++) { const v = lo + (hi - lo) * i / 4; ctx.beginPath(); ctx.moveTo(L, y(v)); ctx.lineTo(cssW - R, y(v)); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText(v.toFixed(2), L - 6, y(v) + 4); }
+    ctx.textAlign = 'center'; for (let g = 1; g <= maxGen; g += Math.max(1, Math.ceil(maxGen / 8))) ctx.fillText(String(g), x(g), cssH - 10);
+    ctx.textAlign = 'left'; ctx.fillText('世代 →', L, cssH - 10 + 0); ctx.textAlign = 'right'; ctx.fillText('fitness', L - 6, T + 4);
+    const alpha = curves.length > 1 ? 0.35 : 1;
+    curves.forEach((h) => {
+      [['avg', C('--muted')], ['best', C('--accent')]].forEach(([k, col]) => {
+        ctx.strokeStyle = col; ctx.globalAlpha = alpha; ctx.lineWidth = k === 'best' ? 1.6 : 1; ctx.beginPath();
+        h.forEach((p, i) => { if (i === 0) ctx.moveTo(x(p.gen), y(p[k])); else ctx.lineTo(x(p.gen), y(p[k])); });
+        ctx.stroke(); ctx.globalAlpha = 1;
+      });
+    });
+  }
+
+  // CSV（§5.3、C1）
+  const csvEsc = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  function csvCurves() {
+    const rows = [['runIndex', 'seed', 'generation', 'best', 'avg', 'bestAssigned', 'bestWait']];
+    (state.ga.results || []).forEach((r, i) => r.history.forEach((p) => rows.push([i, r.seed, p.gen, p.best, p.avg, p.bestAssigned, p.bestWait])));
+    return rows.map((r) => r.map(csvEsc).join(',')).join('\n') + '\n';
+  }
+  function csvStats() {
+    const s = state.ga.summary; const res = state.ga.results || [];
+    const rows = [['runIndex', 'seed', 'assigned', 'totalWait', 'objective', 'bestGen', 'generations', 'stopReason', 'elapsedMs', 'hitZ', 'hitZW', 'dataName', 'revision', 'encoding', 'directMode', 'popSize', 'generationsMax', 'stagnation', 'pc', 'pm', 'tournamentK', 'elite', 'lambda']];
+    const p = state.ga.params || {};
+    res.forEach((r, i) => rows.push([i, r.seed, r.best.score.assigned, r.best.score.totalWait, r.best.score.objective, r.best.gen, r.generations, r.stopReason, Math.round(r.elapsedMs),
+      s && s.reference ? (r.best.score.assigned === s.reference.assigned ? 1 : 0) : '', s && s.reference ? (r.best.score.assigned === s.reference.assigned && r.best.score.totalWait === s.reference.totalWait ? 1 : 0) : '',
+      state.ga.data && state.ga.data.meta.name, state.ga.revision, p.encoding, p.directMode, p.popSize, p.generations, p.stagnation, p.pc, p.pm, p.tournamentK, p.elite, r.params ? r.params.lambda : '']));
+    if (s) {
+      rows.push([]); rows.push(['summary', 'runs', 'bestZ', 'bestW', 'meanZ', 'sdZ', 'meanW', 'sdW', 'meanGenerations', 'meanMs', 'hitZ', 'hitZW', 'hitZRate', 'hitZWRate', 'meanGenToHit', 'missZW', 'refZ', 'refW', 'refProven']);
+      rows.push(['summary', s.runs, s.bestZ, s.bestW, s.meanZ, s.sdZ == null ? 'N/A' : s.sdZ, s.meanW, s.sdW == null ? 'N/A' : s.sdW, s.meanGenerations, s.meanMs, s.hitZ == null ? '' : s.hitZ, s.hitZW == null ? '' : s.hitZW, s.hitZRate == null ? '' : s.hitZRate, s.hitZWRate == null ? '' : s.hitZWRate, s.meanGenToHit == null ? 'N/A' : s.meanGenToHit, s.missZW == null ? '' : s.missZW, s.reference ? s.reference.assigned : '', s.reference ? s.reference.totalWait : '', s.reference ? s.reference.proven : '']);
+    }
+    return rows.map((r) => r.map(csvEsc).join(',')).join('\n') + '\n';
+  }
+  function csvSchedule(slot) {
+    const rows = [['req', 'satellite', 'antenna', 'station', 'band', 'start', 'end', 'startHHMM', 'endHHMM', 'wait']];
+    if (slot) slot.schedule.forEach((it) => { const r = slot.norm.reqById.get(it.req), a = slot.norm.antById.get(it.antenna); if (!r || !a) return; rows.push([r.id, r.sat, a.id, a.station, r.band, it.start, it.start + r.durMin, E.minutesToHHMM(slot.norm, it.start), E.minutesToHHMM(slot.norm, it.start + r.durMin), it.start - r.start]); });
+    return rows.map((r) => r.map(csvEsc).join(',')).join('\n') + '\n';
+  }
+
   // ---------- 排程分頁 ----------
   function initSched() {
     $('#slotSel').addEventListener('click', (e) => { const b = e.target.closest('button[data-slot]'); if (!b) return; state.activeSlot = b.dataset.slot; saveLS(); renderSched(); });
@@ -426,7 +635,7 @@
 
   // ---------- 啟動 ----------
   function boot() {
-    initChrome(); initData(); initModel(); initSched();
+    initChrome(); initData(); initModel(); initGA(); initSched();
     const saved = loadLS();
     let loaded = false;
     if (saved && saved.data && E.validateData(saved.data).ok) {
@@ -450,6 +659,7 @@
   SGS.app = {
     state, gate,
     showTab, loadData, importJSONText, applyDraft, solveMILP, cancelSolve, setSlot, makeSlot, renderSched, ganttLayout,
+    runGA, cancelGA, readGaParams, writeGaParams, csvCurves, csvStats, csvSchedule, gaReference,
     getDraft: () => state.draft,
     _setGLPKFactory: (fn) => { destroyGLPK(); glpkFactory = fn; },
     _glpkDebug: () => ({ inst: glpkInst, pending: !!glpkPromise, gen: glpkGen }),

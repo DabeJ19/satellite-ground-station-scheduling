@@ -4,6 +4,12 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
+// 頁內 waitFor（C1）：逾時 reject 並清除 timer
+const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, rej) => {
+  const t0 = Date.now(); const t = setInterval(() => {
+    let ok = false; try { ok = f(); } catch (e) { clearInterval(t); rej(e); return; }
+    if (ok) { clearInterval(t); res(); } else if (Date.now() - t0 > (timeoutMs || 2000)) { clearInterval(t); rej(new Error('waitFor timeout: ' + (label || ''))); }
+  }, 2); });`;
 
 const OUT = path.join(__dirname, 'out');
 fs.mkdirSync(OUT, { recursive: true });
@@ -23,6 +29,7 @@ async function step(name, fn) {
     page.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
     page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
     page.on('request', (r) => { const u = r.url(); if (!u.startsWith('file://') && !u.startsWith('blob:')) ext.push(u); });
+    await page.addInitScript(WAITFOR);
     await page.goto(URL);
     await page.evaluate(() => { try { localStorage.clear(); } catch (_) {} });
     await page.reload();
@@ -188,7 +195,7 @@ async function step(name, fn) {
         const built = SGS.milp.buildLP(SGS.app.state.norm);
         const vals = {}; built.vars.forEach((v) => { vals[v.name] = (v.req === 'R1' && v.antenna === 'GS_1-S' && v.start === 0) ? 1 : 0; });
         const z = 1;
-        const waitFor = (f) => new Promise((res) => { const t = setInterval(() => { if (f()) { clearInterval(t); res(); } }, 1); });
+        const waitFor = (f, label) => window.__waitFor(f, label || 'step condition', 3000);
         const p1 = SGS.app.solveMILP();                               // run1 @ rev r
         await waitFor(() => deferred.length === 1);
         const before = JSON.stringify(SGS.app.state.slots.milp && SGS.app.state.slots.milp.schedule);
@@ -231,7 +238,7 @@ async function step(name, fn) {
     });
     await step('A3: run A solver rejects after commit + run B started → A null; B state/ownership intact; B result lands', async () => {
       const r = await page.evaluate(async () => {
-        const waitFor = (f) => new Promise((res) => { const t = setInterval(() => { if (f()) { clearInterval(t); res(); } }, 1); });
+        const waitFor = (f, label) => window.__waitFor(f, label || 'step condition', 3000);
         const pend = []; const term = [];
         const inst = Object.assign({}, SGS.milp.K, { version: 'A3', solve: () => new Promise((resolve, reject) => pend.push({ resolve, reject })), terminate: () => term.push('t') });
         SGS.app._setGLPKFactory(() => Promise.resolve(inst));
@@ -258,7 +265,7 @@ async function step(name, fn) {
     });
     await step('A3: boot-style idle init pending + first solve → factory called once, solve runs on that instance', async () => {
       const r = await page.evaluate(async () => {
-        const waitFor = (f) => new Promise((res) => { const t = setInterval(() => { if (f()) { clearInterval(t); res(); } }, 1); });
+        const waitFor = (f, label) => window.__waitFor(f, label || 'step condition', 3000);
         let factoryCalls = 0; let release = null; const started = [];
         SGS.app._setGLPKFactory(() => { factoryCalls++; return new Promise((res) => { release = res; }); });
         SGS.app._warmGLPK();                                           // boot 的閒置初始化（pending）
@@ -276,7 +283,7 @@ async function step(name, fn) {
     });
     await step('A3: commit while a run is initializing → late instance terminated, solve never called, run returns null', async () => {
       const r = await page.evaluate(async () => {
-        const waitFor = (f) => new Promise((res) => { const t = setInterval(() => { if (f()) { clearInterval(t); res(); } }, 1); });
+        const waitFor = (f, label) => window.__waitFor(f, label || 'step condition', 3000);
         let release = null; const started = []; const term = [];
         SGS.app._setGLPKFactory(() => new Promise((res) => { release = res; }));
         const p = SGS.app.solveMILP();                                 // run：初始化 pending

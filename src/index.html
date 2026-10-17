@@ -68,7 +68,21 @@
         <table class="edit" id="tblReq"><thead><tr><th>id</th><th>衛星</th><th>頻段</th><th>時長</th><th>start</th><th>end</th><th></th></tr></thead><tbody></tbody></table>
       </div>
     </div>
-    <p class="muted small">時間為相對時間原點的整數分鐘；區間半開 [start, end)。拖曳編輯與實例產生器於後續 sprint 加入。</p>
+    <div class="card" style="margin-top:14px">
+      <h3>隨機實例產生器（seeded，可重現）</h3>
+      <div class="form gen">
+        <label>seed <input data-gen="seed" type="number" min="0" step="1" value="1"></label>
+        <label>衛星數 <input data-gen="nSat" type="number" min="1" step="1" value="6"></label>
+        <label>地面站數 <input data-gen="nStation" type="number" min="1" step="1" value="3"></label>
+        <label>每站天線數 <input data-gen="nAntennaPerStation" type="number" min="1" step="1" value="2"></label>
+        <label>需求數 <input data-gen="nReq" type="number" min="1" step="1" value="30"></label>
+        <label>時窗密度 0–1 <input data-gen="windowDensity" type="number" min="0" max="1" step="0.1" value="0.7"></label>
+        <label>H（分鐘） <input data-gen="H" type="number" min="10" step="1" value="120"></label>
+        <label>全域校準 <input data-gen="calibDefaultMin" type="number" min="0" step="1" value="10"></label>
+      </div>
+      <div class="toolbar" style="margin-top:10px"><button id="btnGenerate" class="primary">產生並套用為新版本</button><span class="muted small">產出的實例一樣可在上方表格編輯、匯出。</span></div>
+    </div>
+    <p class="muted small">時間為相對時間原點的整數分鐘；區間半開 [start, end)。拖曳編輯於 S3 加入。</p>
   </section>
 
   <!-- ===== 模型 ===== -->
@@ -101,7 +115,43 @@
 
   <!-- ===== GA ===== -->
   <section class="tab hidden" id="tab-ga">
-    <div class="card"><h3>GA 實驗</h3><p class="muted">S2 實作：兩種編碼、算子參數、多次 run 統計、收斂曲線。</p></div>
+    <div class="grid2">
+      <div class="card">
+        <h3>GA 參數</h3>
+        <div class="form">
+          <label>編碼 <select data-ga="encoding"><option value="indirect">間接（優先序 + 天線偏好 + 貪婪解碼）</option><option value="direct">直接（assign / 天線 / 起始）</option></select></label>
+          <label>直接編碼不可行處理 <select data-ga="directMode"><option value="repair">修復（逐筆丟棄衝突）</option><option value="penalty">罰則</option></select></label>
+          <label>罰則 λ（空 = |R|+1） <input data-ga="lambda" type="number" step="0.5" min="0" placeholder="auto"></label>
+          <label>族群 N <input data-ga="popSize" type="number" min="2" step="1" value="50"></label>
+          <label>世代上限 G <input data-ga="generations" type="number" min="1" step="1" value="200"></label>
+          <label>停滯停止 S 代 <input data-ga="stagnation" type="number" min="1" step="1" value="50"></label>
+          <label>交叉率 pc <input data-ga="pc" type="number" min="0" max="1" step="0.05" value="0.9"></label>
+          <label>突變率 pm <input data-ga="pm" type="number" min="0" max="1" step="0.01" value="0.1"></label>
+          <label>錦標賽 k <input data-ga="tournamentK" type="number" min="1" step="1" value="3"></label>
+          <label>菁英數 e <input data-ga="elite" type="number" min="0" step="1" value="2"></label>
+          <label>seed（多次 run：seed+i） <input data-ga="seed" type="number" min="0" step="1" value="42"></label>
+          <label>多次 run 次數 <input data-ga="runs" type="number" min="1" step="1" value="20"></label>
+        </div>
+        <div class="toolbar" style="margin-top:12px">
+          <button id="btnGaOne" class="primary">單次 run</button>
+          <button id="btnGaMulti">多次 run 統計</button>
+          <button id="btnGaCancel" class="ghost" disabled>取消</button>
+        </div>
+        <div id="gaStatus" class="status"></div>
+      </div>
+      <div class="card">
+        <h3>收斂曲線 <span class="muted small" id="gaCurveTitle"></span></h3>
+        <canvas id="gaChart" height="260"></canvas>
+        <div class="legend"><span><i class="sw" style="background:var(--accent)"></i>每代 best fitness</span><span><i class="sw" style="background:var(--muted)"></i>每代 avg fitness</span></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3>結果 <span class="spacer"></span>
+        <button class="mini" id="btnGaCsvCurve">曲線 CSV</button>
+        <button class="mini" id="btnGaCsvStats">統計 CSV</button>
+        <button class="mini" id="btnGaCsvSched">GA 排程 CSV</button></h3>
+      <div id="gaResult" class="muted">尚未執行。</div>
+    </div>
   </section>
 
   <!-- ===== 排程與動畫 ===== -->
@@ -129,6 +179,7 @@
 
 <!-- @inline:glpk -->
 <!-- @inline:default.json -->
+<!-- @inline:sources -->
 <!-- @inline:engine.js -->
 <!-- @inline:milp.js -->
 <!-- @inline:ga.js -->

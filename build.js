@@ -31,12 +31,17 @@ const defaultJS = JSON.stringify(defaultObj)
   .replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
   .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
+// 2b. worker 原始碼：engine.js 與 ga.js 以字串內嵌，供 Blob worker 使用（同一份原始碼，不在 worker 重寫規則）
+const srcEngine = read(path.join(SRC, 'engine.js')), srcGa = read(path.join(SRC, 'ga.js'));
+const workerSources = `window.SGS_SOURCES = ${JSON.stringify({ engine: srcEngine, ga: srcGa }).replace(/<\//g, '<\\/')};`;
+
 // 3. 組裝：index.html 內的 <!-- @inline:xxx --> 標記，每個恰好一次
 const js = (name) => { const s = read(path.join(SRC, name)); assertNoCloser(s, 'script', name); return `<script>\n${s}\n</script>`; };
 const parts = {
   'style.css':    () => { const s = read(path.join(SRC, 'style.css')); assertNoCloser(s, 'style', 'style.css'); return `<style>\n${s}\n</style>`; },
   'glpk':         () => `<script>\n${glpk}\n</script>`,
   'default.json': () => `<script>window.SGS_DEFAULT_DATA = ${defaultJS};</script>`,
+  'sources':      () => `<script>${workerSources}</script>`,
   'engine.js':    () => js('engine.js'),
   'milp.js':      () => js('milp.js'),
   'ga.js':        () => js('ga.js'),

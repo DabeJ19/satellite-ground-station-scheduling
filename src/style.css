@@ -67,3 +67,12 @@ canvas#gantt { width: 100%; display: block; }
 .legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
 @media (max-width: 900px) { .cards3 { grid-template-columns: 1fr; } .form { grid-template-columns: 1fr; } }
 option.invalid-opt { color: var(--bad); }
+
+.form.gen { grid-template-columns: repeat(4, 1fr); }
+canvas#gaChart { width: 100%; display: block; }
+table.stats { border-collapse: collapse; font-size: 13px; width: 100%; margin-top: 8px; }
+table.stats th, table.stats td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--line); }
+table.stats th { color: var(--muted); font-weight: 500; }
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px; margin: 6px 0 10px; }
+.kv div { font-size: 13px; } .kv b { font-size: 18px; display: block; }
+@media (max-width: 900px) { .form.gen { grid-template-columns: 1fr 1fr; } }

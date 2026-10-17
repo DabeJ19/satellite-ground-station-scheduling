@@ -327,6 +327,42 @@
     };
   }
 
+  // ---------- 隨機實例產生器（§3；seeded，可重現） ----------
+  // opts: { nSat, nStation, nAntennaPerStation, nReq, windowDensity, bands, H, calibDefaultMin }
+  function generateInstance(seed, opts) {
+    opts = opts || {};
+    const rnd = mulberry32(seed >>> 0);
+    const ri = (lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1)); // [lo, hi]
+    const nSat = Math.max(1, opts.nSat || 4), nSt = Math.max(1, opts.nStation || 2), nAnt = Math.max(1, opts.nAntennaPerStation || 2);
+    const nReq = Math.max(1, opts.nReq || 12), density = Math.min(1, Math.max(0, opts.windowDensity == null ? 0.7 : opts.windowDensity));
+    const bands = (opts.bands && opts.bands.length ? opts.bands : ['S', 'X']).map(String);
+    const H = Math.max(10, opts.H || 120), calib = opts.calibDefaultMin == null ? 10 : opts.calibDefaultMin;
+    const PAL = ['#4f8ef7', '#f28b5b', '#b48ee0', '#3ccf8e', '#f5b64c', '#e05c8e', '#52c7d8', '#9aa84b'];
+    const satellites = Array.from({ length: nSat }, (_, i) => ({ id: 'SAT_' + (i + 1), color: PAL[i % PAL.length] }));
+    const stations = Array.from({ length: nSt }, (_, i) => ({ id: 'GS_' + (i + 1), angleDeg: Math.round(360 * i / nSt), antennas: [] }));
+    stations.forEach((st) => { for (let k = 0; k < nAnt; k++) { const b = bands[k % bands.length]; st.antennas.push({ id: `${st.id}-${b}${k >= bands.length ? k + 1 : ''}`, band: b, calibMin: null }); } });
+    const visibility = [];
+    satellites.forEach((s) => {
+      let any = false;
+      stations.forEach((st) => {
+        if (rnd() < density) { const len = ri(8, 15), start = ri(0, Math.max(0, H - len)); visibility.push({ sat: s.id, station: st.id, start, end: start + len }); any = true; }
+      });
+      if (!any) { const st = stations[ri(0, nSt - 1)]; const len = ri(8, 15), start = ri(0, Math.max(0, H - len)); visibility.push({ sat: s.id, station: st.id, start, end: start + len }); }
+    });
+    const requests = [];
+    for (let i = 0; i < nReq; i++) {
+      const s = satellites[ri(0, nSat - 1)];
+      const vis = visibility.filter((v) => v.sat === s.id);
+      const w = vis[ri(0, vis.length - 1)];
+      const dur = ri(2, 5);
+      const slack = ri(2, 8);
+      const start = Math.max(0, w.start - ri(0, 3));
+      const end = Math.min(H, Math.max(start + dur, w.start + dur + slack));
+      requests.push({ id: 'R' + (i + 1), sat: s.id, band: bands[ri(0, bands.length - 1)], durMin: dur, start, end });
+    }
+    return { meta: { name: `random seed=${seed} n=${nReq}`, timeOrigin: '10:00', horizonMin: H, calibDefaultMin: calib }, bands, satellites, stations, visibility, requests };
+  }
+
   function minutesToHHMM(norm, m) {
     const [h0, m0] = String(norm.meta.timeOrigin || '00:00').split(':').map(Number);
     const total = h0 * 60 + m0 + m;
@@ -336,6 +372,6 @@
 
   SGS.engine = {
     validateData, normalize, expandAntennas, feasibleStarts, checkFeasible, score, compareScores,
-    greedyDecode, mulberry32, minutesToHHMM, visSegments, fmt,
+    greedyDecode, mulberry32, minutesToHHMM, visSegments, fmt, generateInstance,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

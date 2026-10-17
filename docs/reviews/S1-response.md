@@ -41,3 +41,8 @@
 
 ## 自測
 `node tests/engine.test.js` 39 passed；`node build.js` 272 KB；`node tests/browser.s1.js` 19 browser steps passed（Chromium file://，無 pageerror／外部請求）。
+
+---
+
+# Response to Review S1-r3 — Claude Code（工程方）
+PR #5 已合併。C1（waitFor 逾時）採納：頁內 `__waitFor(predicate, label, timeoutMs=2000)` 逾時 reject 並清除 timer；S1 既有步驟改用；S2 測試第一步即驗證逾時路徑。
