@@ -1,4 +1,6 @@
-# tools/enumerate.py — 獨立全列舉 oracle（純 Python，不依賴 engine）。用法：python3 tools/enumerate.py src/data/default.json [R1=7]
+# tools/enumerate.py — 獨立全列舉 oracle（純 Python，不依賴 engine）。
+# 用法：python3 tools/enumerate.py src/data/default.json [R1=7]
+# 依 SPEC §2.1 先合併每 (sat,station) 的重疊／相鄰 visibility，候選以 (antenna,start) 去重。
 import json, itertools, sys
 d=json.load(open(sys.argv[1]))
 H=d['meta']['horizonMin']; cd=d['meta']['calibDefaultMin']
@@ -6,19 +8,26 @@ ants=[]
 for s in d['stations']:
     for a in s['antennas']:
         ants.append(dict(id=a['id'],st=s['id'],band=a['band'],c=cd if a.get('calibMin') is None else a['calibMin']))
+raw={}
+for v in d['visibility']: raw.setdefault((v['sat'],v['station']),[]).append((v['start'],v['end']))
 vis={}
-for v in d['visibility']: vis.setdefault((v['sat'],v['station']),[]).append((v['start'],v['end']))
+for k,segs in raw.items():
+    segs.sort(); merged=[]
+    for s,e in segs:
+        if merged and s<=merged[-1][1]: merged[-1]=(merged[-1][0],max(merged[-1][1],e))
+        else: merged.append((s,e))
+    vis[k]=merged
+reqs=d['requests']
+if len(sys.argv)>2:
+    k,v=sys.argv[2].split('='); [r.update(durMin=int(v)) for r in reqs if r['id']==k]
 def cands(r):
-    out=[]
+    out=set()
     for a in ants:
         if a['band']!=r['band']: continue
         for (vs,ve) in vis.get((r['sat'],a['st']),[]):
             lo=max(r['start'],vs,0); hi=min(r['end'],ve,H)-r['durMin']
-            for t in range(lo,hi+1): out.append((a['id'],t))
-    return out
-reqs=d['requests']
-if len(sys.argv)>2:  # override durMin for a request: id=dur
-    k,v=sys.argv[2].split('='); [r.update(durMin=int(v)) for r in reqs if r['id']==k]
+            for t in range(lo,hi+1): out.add((a['id'],t))
+    return sorted(out)
 C=[[None]+cands(r) for r in reqs]
 amap={a['id']:a for a in ants}
 best=None; nfeas=0; n5=0
