@@ -1,6 +1,6 @@
 # Codex 複審 Prompt — S2-r3
 
-複審 S2。被審 commit `__SHA__`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S2-codex-r3.md`，不改其他檔。
+複審 S2。被審 commit `a07b083`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S2-codex-r3.md`，不改其他檔。
 
 讀：`docs/reviews/S2-response.md` 第二段（r2 回應）→ `src/ui.js`（runGA 的 effective/lambdaMode、drawGaChart）→ `tests/browser.s2.js` N1／N2 步驟。
 
