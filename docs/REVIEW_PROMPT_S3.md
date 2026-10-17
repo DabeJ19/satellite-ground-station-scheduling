@@ -1,6 +1,6 @@
 # Codex 審查 Prompt — S3
 
-審 S3（程式碼審查）。被審 commit `__SHA__`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S3-codex.md`，不改其他檔。
+審 S3（程式碼審查）。被審 commit `9980055`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S3-codex.md`，不改其他檔。
 
 讀：`docs/REVIEW_REQUEST_S3.md` → `SPEC.md` §6、§8 S3 → `src/anim.js` → `src/ui.js`（搜尋：initGanttDrag、ensureManual、setManualTask、initPlayback、setTime、startPlay、drawAnim、initWinEditor）→ `tests/anim.test.js`、`tests/browser.s3.js`。不審 `dist/`、`vendor/`。
 
