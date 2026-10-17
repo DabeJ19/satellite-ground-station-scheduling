@@ -120,3 +120,5 @@
 | GA 參數 | 執行前驗證；有效參數快照（resolveParams）回寫並凍結；λ 低於 |R|+1 顯示警示 | B4 |
 | CSV | 曲線與統計皆含批次 runId；summary 含 gapZ | B5、B6 |
 | 違規集合 | decode 保留 violations 集合與 rawFitness | A1 |
+| auto λ | 使用者設定（null=auto）與每批有效參數分開保存；不回寫控制項 | S2-r2 N1 |
+| 曲線座標 | 以實際 gen 值 0..maxGen 建軸 | S2-r2 N2 |

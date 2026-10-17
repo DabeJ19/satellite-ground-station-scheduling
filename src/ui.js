@@ -431,12 +431,12 @@ self.onmessage = function (e) {
     markGaErrors(v.errors);
     if (!v.ok) { setGaStatus('<span class="badge bad">參數錯誤</span> ' + v.errors.map((e) => esc(e.path + '：' + e.msg)).join('；')); return Promise.resolve(null); }
     const norm = state.norm, data = state.data, revision = state.revision;   // 快照
-    const effective = Object.freeze(Object.assign({}, SGS.ga.resolveParams(norm, input), { runs }));   // 有效參數快照（含 λ 實值）
-    writeGaParams(effective); state.settings.ga = Object.assign({}, effective); saveLS();
+    const effective = Object.freeze(Object.assign({}, SGS.ga.resolveParams(norm, input), { runs, lambdaMode: input.lambda == null ? 'auto' : 'manual' }));   // 本批有效參數快照（auto λ 依當次 norm 重算）
+    state.settings.ga = Object.assign({}, input); saveLS();   // 使用者設定（λ 留空 = auto）與每批 effective 分開保存，不回寫控制項
     const runId = gateGA.begin(revision);
     const seeds = SGS.ga.runSeeds(effective.seed, runs);
     const progressEvery = Math.max(1, Math.floor(effective.generations / 50));
-    const lambdaWarn = effective.encoding === 'direct' && effective.directMode === 'penalty' && effective.lambda < norm.requests.length + 1;
+    const lambdaWarn = effective.encoding === 'direct' && effective.directMode === 'penalty' && effective.lambdaMode === 'manual' && effective.lambda < norm.requests.length + 1;
     let worker;
     try { worker = makeWorker(); } catch (err) { setGaStatus(`<span class="badge bad">無法建立 worker</span> ${esc(err.message)}`); return Promise.resolve(null); }
     let resolveFn;
@@ -497,7 +497,7 @@ self.onmessage = function (e) {
       html += `</div><p class="muted small">參考：MILP ${ref.proven ? '已證明最佳' : '未證明最佳（incumbent）'} (Z*, W*) = (${ref.score.assigned}, ${ref.score.totalWait})，版本 r${state.revision}。${ref.proven ? '' : '未證明最佳時只報對 incumbent 的差距，不稱最佳命中率，差距不代表最優性。'}</p>`;
     } else html += `</div><p class="muted small">目前版本沒有可比較的 MILP 解（先在「模型」分頁求解），只列 GA 自身統計。</p>`;
     const p = state.ga.params || {};
-    html += `<p class="muted small">本批有效參數（runId ${esc(state.ga.runId)}）：${esc(p.encoding)}${p.encoding === 'direct' ? '/' + esc(p.directMode) + '，λ=' + p.lambda : ''}，N=${p.popSize}，G=${p.generations}，S=${p.stagnation}，pc=${p.pc}，pm=${p.pm}，k=${p.tournamentK}，e=${p.elite}，seed=${p.seed}</p>`;
+    html += `<p class="muted small">本批有效參數（runId ${esc(state.ga.runId)}）：${esc(p.encoding)}${p.encoding === 'direct' ? '/' + esc(p.directMode) + '，λ=' + p.lambda + (p.lambdaMode === 'auto' ? '（auto = |R|+1）' : '（手動）') : ''}，N=${p.popSize}，G=${p.generations}，S=${p.stagnation}，pc=${p.pc}，pm=${p.pm}，k=${p.tournamentK}，e=${p.elite}，seed=${p.seed}</p>`;
     html += `<table class="stats"><thead><tr><th>#</th><th>seed</th><th>Z</th><th>W</th><th>objective</th><th>達最佳世代</th><th>世代數</th><th>停止原因</th><th>ms</th></tr></thead><tbody>` +
       results.map((r, i) => `<tr><td>${i + 1}</td><td>${r.seed}</td><td>${r.best.score.assigned}</td><td>${r.best.score.totalWait}</td><td>${r.best.score.objective.toFixed(4)}</td><td>${r.best.gen}</td><td>${r.generations}</td><td>${esc(r.stopReason)}</td><td>${Math.round(r.elapsedMs)}</td></tr>`).join('') + '</tbody></table>';
     $('#gaResult').innerHTML = html;
@@ -514,15 +514,20 @@ self.onmessage = function (e) {
     $('#gaCurveTitle').textContent = curves.length ? `（${curves.length} 次 run，每代 best／avg fitness）` : '';
     if (!curves.length) { ctx.fillStyle = C('--muted'); ctx.font = '13px system-ui'; ctx.fillText('尚無資料', 20, 30); return; }
     const L = 48, R = 12, T = 12, B = 28;
-    const maxGen = Math.max(...curves.map((h) => h.length));
+    // 繪圖範圍依 history 實際 gen 值：minGen=0、maxGen=各曲線最後世代的最大值（與 history／CSV 同一編號）
+    const minGen = 0, maxGen = Math.max(0, ...curves.map((h) => (h.length ? h[h.length - 1].gen : 0)));
     let lo = Infinity, hi = -Infinity;
     curves.forEach((h) => h.forEach((p) => { lo = Math.min(lo, p.avg, p.best); hi = Math.max(hi, p.avg, p.best); }));
     if (!Number.isFinite(lo)) { lo = 0; hi = 1; } if (hi - lo < 1e-9) { hi = lo + 1; }
-    const x = (g) => L + ((g - 1) / Math.max(1, maxGen - 1)) * (cssW - L - R);
+    const span = Math.max(1, maxGen - minGen);
+    const x = (g) => L + ((g - minGen) / span) * (cssW - L - R);
     const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (cssH - T - B);
+    const tickStep = Math.max(1, Math.ceil(span / 8));
+    const ticks = []; for (let g = minGen; g <= maxGen; g += tickStep) ticks.push(g); if (ticks[ticks.length - 1] !== maxGen) ticks.push(maxGen);
+    state.lastGaChart = { minGen, maxGen, ticks: ticks.map((g) => ({ gen: g, x: x(g) })), points: curves.map((h) => h.map((p) => ({ gen: p.gen, x: x(p.gen) }))), plotLeft: L, plotRight: cssW - R };
     ctx.strokeStyle = C('--grid'); ctx.lineWidth = 1; ctx.font = '11px system-ui'; ctx.fillStyle = C('--muted');
     for (let i = 0; i <= 4; i++) { const v = lo + (hi - lo) * i / 4; ctx.beginPath(); ctx.moveTo(L, y(v)); ctx.lineTo(cssW - R, y(v)); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText(v.toFixed(2), L - 6, y(v) + 4); }
-    ctx.textAlign = 'center'; for (let g = 1; g <= maxGen; g += Math.max(1, Math.ceil(maxGen / 8))) ctx.fillText(String(g), x(g), cssH - 10);
+    ctx.textAlign = 'center'; ticks.forEach((g) => ctx.fillText(String(g), x(g), cssH - 10));
     ctx.textAlign = 'left'; ctx.fillText('世代 →', L, cssH - 10 + 0); ctx.textAlign = 'right'; ctx.fillText('fitness', L - 6, T + 4);
     const alpha = curves.length > 1 ? 0.35 : 1;
     curves.forEach((h) => {

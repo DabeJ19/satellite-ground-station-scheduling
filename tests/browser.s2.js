@@ -159,6 +159,63 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
       assert.strictEqual(r.same, true);
       await page.evaluate(() => SGS.app.writeGaParams({ encoding: 'indirect', directMode: 'repair', lambda: null, popSize: 50, generations: 200, stagnation: 50, seed: 42, runs: 20 }));
     });
+    await step('N1: auto λ recomputed per data (n=6 → 7, n=30 → 31); manual λ kept with warning; auto survives reload', async () => {
+      const r = await page.evaluate(async () => {
+        await SGS.app.loadData(window.SGS_DEFAULT_DATA);
+        SGS.app.writeGaParams({ encoding: 'direct', directMode: 'penalty', lambda: null, popSize: 10, generations: 10, stagnation: 10, seed: 42, runs: 1 });
+        await SGS.app.runGA(1);
+        const first = { lambda: SGS.app.state.ga.params.lambda, mode: SGS.app.state.ga.params.lambdaMode, input: document.querySelector('[data-ga="lambda"]').value, csv: SGS.app.csvStats().split('\n')[1].split(',')[23], warn: /不再保證/.test(document.getElementById('gaStatus').innerText) };
+        SGS.app.loadData(SGS.engine.generateInstance(1, { nReq: 30, nSat: 6, nStation: 3 }));
+        await SGS.app.runGA(1);
+        const second = { lambda: SGS.app.state.ga.params.lambda, input: document.querySelector('[data-ga="lambda"]').value, csv: SGS.app.csvStats().split('\n')[1].split(',')[23], warn: /不再保證/.test(document.getElementById('gaStatus').innerText), text: /auto = \|R\|\+1/.test(document.getElementById('gaResult').innerText) };
+        // manual 7 stays manual on n=30 and warns
+        SGS.app.writeGaParams({ lambda: 7 }); document.querySelector('[data-ga="lambda"]').dispatchEvent(new Event('change'));
+        await SGS.app.runGA(1);
+        const manual = { lambda: SGS.app.state.ga.params.lambda, mode: SGS.app.state.ga.params.lambdaMode, warn: /不再保證/.test(document.getElementById('gaStatus').innerText) };
+        // indirect then penalty keeps auto intent
+        SGS.app.writeGaParams({ lambda: null, encoding: 'indirect' }); document.querySelector('[data-ga="lambda"]').dispatchEvent(new Event('change'));
+        await SGS.app.runGA(1);
+        SGS.app.writeGaParams({ encoding: 'direct', directMode: 'penalty' });
+        await SGS.app.runGA(1);
+        const again = { lambda: SGS.app.state.ga.params.lambda, mode: SGS.app.state.ga.params.lambdaMode, input: document.querySelector('[data-ga="lambda"]').value };
+        return { first, second, manual, again, saved: JSON.parse(localStorage.getItem('sgs.state.v1')).settings.ga.lambda };
+      });
+      assert.deepStrictEqual([r.first.lambda, r.first.mode, r.first.input, r.first.csv, r.first.warn], [7, 'auto', '', '7', false]);
+      assert.deepStrictEqual([r.second.lambda, r.second.input, r.second.csv, r.second.warn, r.second.text], [31, '', '31', false, true]);
+      assert.deepStrictEqual([r.manual.lambda, r.manual.mode, r.manual.warn], [7, 'manual', true]);
+      assert.deepStrictEqual([r.again.lambda, r.again.mode, r.again.input], [31, 'auto', '']);
+      assert.strictEqual(r.saved, null);
+      // reload → auto persists and recomputes
+      await page.reload();
+      await page.waitForFunction(() => document.getElementById('glpkStatus').textContent.includes('就緒'), null, { timeout: 20000 });
+      const r2 = await page.evaluate(async () => { const inp = document.querySelector('[data-ga="lambda"]').value; await SGS.app.runGA(1); return { inp, lambda: SGS.app.state.ga.params.lambda, n: SGS.app.state.norm.requests.length }; });
+      assert.deepStrictEqual([r2.inp, r2.lambda], ['', r2.n + 1]);
+      await page.evaluate(async () => { await SGS.app.loadData(window.SGS_DEFAULT_DATA); SGS.app.writeGaParams({ encoding: 'indirect', directMode: 'repair', lambda: null, popSize: 50, generations: 200, stagnation: 50, seed: 42, runs: 20 }); await SGS.app.solveMILP(); });
+    });
+    await step('N2: chart axis uses gen 0..maxGen; generations=1 → gen0 at plotLeft, gen1 at plotRight, ticks [0,1]', async () => {
+      await page.evaluate(() => SGS.app.showTab('ga'));
+      const r = await page.evaluate(async () => {
+        SGS.app.writeGaParams({ generations: 1, stagnation: 50, seed: 1, runs: 1 });
+        await SGS.app.runGA(1);
+        const c = SGS.app.state.lastGaChart;
+        return { gens: SGS.app.state.ga.results[0].history.map((h) => h.gen), ticks: c.ticks.map((t) => t.gen), pts: c.points[0], L: c.plotLeft, R: c.plotRight, maxGen: c.maxGen };
+      });
+      assert.deepStrictEqual(r.gens, [0, 1]); assert.deepStrictEqual(r.ticks, [0, 1]);
+      assert.strictEqual(r.pts[0].x, r.L); assert.strictEqual(r.pts[1].x, r.R);
+      r.pts.forEach((p) => assert.ok(p.x >= r.L && p.x <= r.R));
+      const r3 = await page.evaluate(async () => {
+        SGS.app.writeGaParams({ encoding: 'direct', directMode: 'repair', generations: 100, stagnation: 50, seed: 1, runs: 3 });
+        await SGS.app.runGA(3);
+        const c = SGS.app.state.lastGaChart; const res = SGS.app.state.ga.results;
+        const r0 = res[0];
+        const firstHit = r0.history.find((h) => h.bestAssigned === 5 && h.bestWait === 11);
+        return { maxGen: c.maxGen, lastGens: res.map((x) => x.history[x.history.length - 1].gen), allIn: c.points.every((pts) => pts.every((p) => p.x >= c.plotLeft && p.x <= c.plotRight)), lastX: c.points.map((pts) => pts[pts.length - 1].x), R: c.plotRight, bestGen: r0.best.gen, firstHitGen: firstHit && firstHit.gen, tick0: c.ticks[0].gen };
+      });
+      assert.strictEqual(r3.maxGen, Math.max(...r3.lastGens)); assert.ok(r3.allIn); assert.strictEqual(r3.tick0, 0);
+      assert.ok(r3.lastX.some((x) => x === r3.R), 'longest curve ends at plotRight');
+      assert.strictEqual(r3.bestGen, r3.firstHitGen);
+      await page.evaluate(() => SGS.app.writeGaParams({ encoding: 'indirect', directMode: 'repair', generations: 200, stagnation: 50, seed: 42, runs: 20 }));
+    });
     await step('B5: two batches with same seed → distinct runId in curve CSV; rows map back to history', async () => {
       const r = await page.evaluate(async () => {
         await SGS.app.runGA(1); const c1 = SGS.app.csvCurves(); const id1 = SGS.app.state.ga.runId; const h1 = SGS.app.state.ga.results[0].history;
@@ -204,7 +261,7 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
     });
     await step('generator seed=1, 30 requests → MILP (tmlim 30) vs GA gap reported', async () => {
       await page.evaluate(() => SGS.app.showTab('data'));
-      await page.fill('input[data-gen="seed"]', '1'); await page.fill('input[data-gen="nReq"]', '30'); await page.fill('input[data-gen="nSat"]', '6'); await page.fill('input[data-gen="nStation"]', '3');
+      await page.fill('input[data-gen="seed"]', '1'); await page.fill('input[data-gen="nReq"]', '30'); await page.fill('input[data-gen="nSat"]', '6'); await page.fill('input[data-gen="nStation"]', '3'); await page.fill('input[data-gen="H"]', '120');
       await page.click('#btnGenerate');
       const r = await page.evaluate(async () => {
         const n = SGS.app.state.norm.requests.length;

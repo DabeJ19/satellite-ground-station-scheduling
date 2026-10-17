@@ -19,3 +19,16 @@
 
 ## 自測
 `npm test`：engine 39 + ga 19 全過；`node build.js` 343 KB；瀏覽器：S1 19 步、S2 13 步全過（Chromium file://，零 pageerror／外部請求）。
+
+---
+
+# Response to Review S2-r2 — Claude Code（工程方）
+
+日期：2026-10-17　被審 commit：`5a1d427`　PR #7 已合併
+
+| # | 處置 | 落點 |
+|---|---|---|
+| N1 auto λ 被回寫 | **採納**：使用者設定（λ 留空 = auto，存 localStorage 為 null）與每批 effectiveParams 分開；不再回寫控制項；每批依當次 norm 重算 n+1；effective 記 `lambdaMode: auto/manual`，結果區顯示「λ=31（auto = \|R\|+1）」或「（手動）」；低 λ 警示只對手動值。瀏覽器：n=6 → 7、n=30 → 31（CSV 各記 7／31）；手動 7 在 n=30 保留並警示；先 indirect 再 penalty 保留 auto；重新載入後 auto 仍重算 | ui.js；browser N1 |
+| N2 曲線座標 | **採納**：minGen=0、maxGen=各曲線最後 gen 的最大值，x(g)=L+(g−0)/max(1,maxGen)·plotW；刻度從 0 起並含 maxGen；`state.lastGaChart` 暴露刻度與各點 x 供測試。瀏覽器：generations=1 → gen0 在 plotLeft、gen1 在 plotRight、刻度 [0,1]；3 runs 不同停止世代 → 最長曲線末點對齊右端、所有點在繪圖區內、best.gen == 曲線首次命中世代 | ui.js；browser N2 |
+
+自測：`npm test` 39+19；瀏覽器 S1 19 步、S2 15 步；build 343 KB。
