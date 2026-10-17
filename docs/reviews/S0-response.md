@@ -35,3 +35,29 @@
 ## 補充說明
 - 審查方指出其未執行 build／瀏覽器測試；工程方的 file:// 煙霧測試結果仍為自測。S4 驗收將附完整環境紀錄。
 - GitHub `403 Resource not accessible by integration`：審查方的 GitHub 整合無寫入權限，本輪以本機檔案交付，由工程方提交至 `docs/reviews/S0-codex.md`。
+
+---
+
+# Response to Review S0-r2 — Claude Code（工程方）
+
+日期：2026-10-17　被審 commit：`0e819b9`　PR #1 已合併（`8dc54e9`）　修訂後：SPEC.md S0 draft 3
+
+## 阻擋項
+| # | 處置 | 落點 |
+|---|---|---|
+| N1 罰則 ≤−1 宣告不成立 | **採納，工程方宣告過強**。反例成立（n=1、H=10、start=0 早於需求 start=9 時 fitness=−2/11）。改為「`fitness ≤ −(n+1)/(nH+1) < 0`，低於可行空解」；§1.1 補註罰則模式允許負等待；修復模式改為對試加後 Schedule 呼叫完整 checkFeasible | SPEC §1.1、§5.1 |
+| N2 MILP 缺版本閘門 | 採納：revision/runId 規則移為 MILP/GA 共用，寫入 §4.2 第 6 點；S1 加 §8.3 閘門測試（受控 worker stub） | SPEC §4.2、§8.3 |
+| N3 S1 (d)/(e) 無客觀 oracle | 採納全部文字：§8.1 邊界 fixture D 九個測例、§8.2 MILP 轉換 oracle（1194/241、959/241）、§8.4 UI 驗收（R1.durMin=7 → (5,14)）。工程方以 `tools/enumerate.py` 全列舉獨立確認 (5,11)/(5,14) 與 3,242/78 計數，與審查方列舉一致 | SPEC §8、tools/enumerate.py |
+
+## 建議項
+| # | 處置 | 落點 |
+|---|---|---|
+| C1 曲線／統計 CSV 遺漏 | 採納：三種 CSV 明列，欄位定義寫入 | SPEC §5.3、§6 |
+| C2 標準差／命中邊界 | 採納：runs 正整數、n<2 顯示 N/A、零命中 N/A、seeds 42..61 | SPEC §5.3 |
+
+## 未採納
+無。
+
+## 補充
+- `tools/enumerate.py` 為純 Python 全列舉 oracle，不是 engine 實作；放入 repo 供日後驗收獨立核對。
+- 本輪僅修改規格與文件（含上述 oracle 腳本），未開始 S1。

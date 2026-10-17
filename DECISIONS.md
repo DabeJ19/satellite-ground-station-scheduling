@@ -61,3 +61,14 @@
 | build | SHA-256 + 標記唯一 + JSON 轉義；AST adapter 延後 | 固定 vendor 版本下足夠 |
 | 授權 | 單檔內附 GPL-3.0 聲明；README 區分授權 | 交付物含 GPL 依賴 |
 | 協作 | AGENTS.md 加入 S5 最小同步規則 | 防止舊 review 誤套新版本、覆蓋對方變更 |
+
+## 2026-10-17 S0 複審後修訂（Codex 退回 3 項必修 → draft 3）
+| 項目 | 決定 | 原因 |
+|---|---|---|
+| 罰則模式可行優先證明 | λ = n+1 保留；保證改為 `fitness ≤ −(n+1)/(nH+1) < 0`，不宣稱 ≤ −1；罰則模式允許負等待（只影響 raw fitness） | 審查反例：start 早於需求 start 產生負等待，原宣告過強 |
+| 修復模式 | 對試加後 Schedule 呼叫完整 checkFeasible | 單筆時窗／頻段違規不能只靠成對衝突檢查 |
+| 版本閘門 | revision/runId 寫入規則改為 MILP 與 GA 共用（§4.2 第 6 點），S1 即驗收 | S1 已同時有可編輯資料與非同步 MILP |
+| S1 驗收 oracle | 新增 §8.1 邊界 fixture D、§8.2 MILP 轉換 oracle、§8.3 閘門測試、§8.4 UI 驗收 | 原 (d)/(e) 無法客觀判定 |
+| 驗收工具 | 加入 `tools/enumerate.py` 全列舉 oracle | 獨立核對 (5,11)、(5,14) |
+| 匯出 | 明列排程／曲線／統計三種 CSV | draft 2 改寫時遺漏 |
+| 統計邊界 | n<2 標準差與零命中世代數顯示 N/A | 避免 NaN |

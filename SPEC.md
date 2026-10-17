@@ -1,9 +1,10 @@
 # SPEC — 太空衛星地面站排程：最佳解（MILP）與基因演算法（GA）互動工具
 
-版本：S0 draft 2（2026-10-17）　狀態：已依 Codex S0 審查修訂（docs/reviews/S0-codex.md）
+版本：S0 draft 3（2026-10-17）　狀態：已依 Codex S0 複審修訂（docs/reviews/S0-codex-r2.md）
 PO：James　工程：Claude Code　審查：Codex
 
 變更摘要（draft 1 → 2）：修正 §1.3 上界證明（B1）；明定等待基準與目標計算（B2）；新增資料驗證契約與候選集合定義（B3）；重寫超時 LP 上界／gap 規則（B4）；納入 S1–S7 建議；§9 開放問題全部結案。
+變更摘要（draft 2 → 3）：罰則模式負等待與可行優先證明修正（N1）；MILP/GA 共用 revision/runId 寫入閘門（N2）；S1 驗收補邊界 fixture D、MILP 轉換 oracle 與 UI 驗收（N3）；三種 CSV 匯出（C1）；統計邊界 N/A 規則（C2）。
 
 ---
 
@@ -32,6 +33,7 @@ Max Z = 排入通訊之總任務數。
 正式比較可行解時使用字典序 `(assigned 降序, totalWait 升序)`，與上述加權目標數學等價：
 因 `0 ≤ totalWait ≤ |R|·H`，任務數多一筆的解其 objective 至少多 `1/(|R|·H+1) > 0`。
 空解分數為 `(0, 0, 0)`；`|R| = 0` 時直接回傳空解。
+`0 ≤ totalWait ≤ |R|·H` 與字典序等價的敘述只針對**可行**排程。GA 罰則模式允許非負整數 start 早於 `requests[r].start`（違反時窗），此時 wait 可為負，僅用於 raw fitness，不改正式可行解的評分定義（§5.1）。
 GLPK 為浮點運算，回傳後一律重新以整數計算 `assigned`、`totalWait` 並驗證，不以浮點 z 當作證明。
 
 ### 1.2 限制
@@ -151,6 +153,7 @@ S1 使用每分鐘列；記錄候選數、列數、非零係數數、建模與�
 4. 上界與 gap（僅在未證明最佳時）：令 L 為通過 `checkFeasible` 之整數排程的加權 objective。LP 鬆弛沿用同一目標與全部列，變數改為連續 `0 ≤ x ≤ 1`（顯式 bounds，移除 binaries/generals）。**只有 LP 狀態 `GLP_OPT` 才把其 objective 記為 U**；LP 的 FEAS/UNDEF/失敗均不提供 U，顯示「上界／gap 尚未取得」。沒有剩餘時間預算就不啟動 LP。
    有 U 時顯示 `absoluteGap = max(0, U − L)`、`relativeGap = absoluteGap / max(1, |L|)`，並標示「加權目標的 LP 鬆弛 gap，非原生 B&B gap，亦非任務數差距」。若 U 顯著小於 L（超出浮點容差），回報計算錯誤，不截成 0 掩蓋。
 5. 「模型」分頁以純 HTML/CSS（`<sub>`、`<sup>`、Unicode）顯示上述式子，不引入 KaTeX。
+6. **版本閘門（MILP 與 GA 共用）**：每次求解捕捉正規化資料的不可變快照、目前 `revision` 與新 `runId`；輸出一律對該快照驗證和評分。資料變動、取消或新 run 啟動後，任何不符合目前 revision／有效 runId 的進度、解、LP 上界、錯誤與完成訊息全部丟棄，不更新解槽或目前求解狀態；取消使 runId 立即失效並終止／清理 worker。只有有效結果才帶相同 revision 寫入解槽。
 
 ---
 
@@ -163,7 +166,8 @@ S1 使用每分鐘列；記錄候選數、列數、非零係數數、建模與�
 
 **直接編碼**：染色體 = 每需求 (assign ∈{0,1}, antennaIdx, start)。結構非法（重複需求、負起始、非整數）者先拒絕／正規化再計分。
 - 修復模式：依 `requests` 陣列順序逐筆檢查，與已接受任務衝突者從 phenotype 移除；fitness = 修復後 Schedule 的 `engine.score`。
-- 罰則模式：`fitness = score.objective − λ·V`，V 為共用檢查器回報、依 `(rule, reqs)` 去重的違規數。λ 預設 `|R| + 1`（每次資料變更重算；此值保證任何不可行者分數 ≤ −1，低於可行空解 0），仍可調；使用者調低 λ 時標明不再保證可行解優先。另存 rawFitness、違規集合與最佳可行解（空排程保底）。
+- 罰則模式：`fitness = score.objective − λ·V`，V 為共用檢查器回報、依 `(rule, reqs)` 去重的違規數。計分前先拒絕未知引用、重複需求、負或非整數 start，使已排筆數至多 n = |R|。λ 預設 `n + 1`（每次資料變更重算），仍可調。**可行優先證明**：n ≥ 1 時合法資料有 `request.start ≤ H−1`，即使有時窗違規（負等待）亦有 `W ≥ −n(H−1)`，故 `F ≤ n + n(H−1)/(nH+1)`；任何不可行者 V ≥ 1，則 `fitness ≤ −(n+1)/(nH+1) < 0`，低於可行空解 0（不宣稱必 ≤ −1）。使用者調低 λ 時標明不再保證可行解優先。另存 rawFitness、違規集合與最佳可行解（空排程保底）。
+- 修復模式對「試加後」的 Schedule 呼叫完整 `checkFeasible`，任一單筆時窗／頻段／資源違規均須移除該筆，不只檢查與已接受任務的成對衝突。
 
 兩種編碼的可行 phenotype 都用同一 `score()` 評分，可直接比較；罰則模式的 raw fitness 不作為與 MILP 比較的品質指標。
 
@@ -177,8 +181,9 @@ S1 使用每分鐘列；記錄候選數、列數、非零係數數、建模與�
 
 ### 5.3 實驗分頁
 - 單次 run：每代 best / avg 曲線（canvas 自繪），可中斷；worker 與主頁交換資料快照及 `revision/runId`，資料改動或取消後的舊結果不覆蓋目前解槽。
-- 多次 run：runs 次（預設 20），run seed = `(baseSeed + i) >>> 0`；匯出每次 seed、資料／參數版本、停止原因、assigned/totalWait。
-- 統計：分別報「命中主目標 Z*」與「命中完整最佳 (Z*, W*)」；只有同一資料且 MILP 已證明最佳時才稱「最佳命中率」，否則報對 incumbent 的差距。平均達最佳世代數只對命中 runs 計算，未命中數另列；標準差採樣本定義（n−1）。
+- 多次 run：runs 次（正整數，預設 20），i 從 0 起算，run seed = `(baseSeed + i) >>> 0`（預設 42..61）；匯出每次 seed、資料／參數版本、停止原因、assigned/totalWait。
+- 匯出三種 CSV：排程 CSV、每代 best/avg 曲線 CSV（逐列 runId、seed、generation、best、avg）、多次 run 統計 CSV（每次 assigned/totalWait、停止原因、兩種命中結果及彙整指標）。S2 驗證欄位與畫面一致，S4 驗證單檔下載可用。
+- 統計：分別報「命中主目標 Z*」與「命中完整最佳 (Z*, W*)」；只有同一資料且 MILP 已證明最佳時才稱「最佳命中率」，否則報對 incumbent 的差距。平均達最佳世代數只對命中 runs 計算，未命中數另列；零次命中時該值為 N/A（命中數 0、未命中數 = runs）。標準差採樣本定義（n−1），樣本數不足 2 時顯示／匯出 N/A，不輸出 NaN 或以 0 冒充。
 - 以隨機實例產生器產生中／大型實例做比較（PPT 實例太小）。
 
 ---
@@ -196,7 +201,7 @@ S1 使用每分鐘列；記錄候選數、列數、非零係數數、建模與�
      - 衛星相位 θ(t) = ω t + φ：固定 `ω = 360/H` 度／分鐘（僅視覺參數）；φ 以各時窗中點 (t_mid, 站角度) 的**圓周角距離**平方和最小化擬合；沒有可見時窗時按衛星索引等距初始化；多解時取最小角度。顯示擬合殘差，不當作違規。
      - **接觸狀態以資料為準**：時窗內 → 站與軌道段發光；任務進行中 → 站—星連線（顏色 = 衛星）；校準中 → 天線灰點。
    - 播放／暫停／倍速（0.5–8×）／時間軸拖曳；同一游標驅動動畫與甘特圖。
-   - 匯出：甘特圖 PNG、動畫當前幀 PNG、排程 CSV/JSON。
+   - 匯出：甘特圖 PNG、動畫當前幀 PNG、排程 CSV/JSON（GA 的曲線／統計 CSV 見 §5.3）。
 
 ---
 
@@ -230,10 +235,54 @@ satellite-ground-station-scheduling/
 | Sprint | 交付 | 驗收 |
 |---|---|---|
 | S0 | 本 SPEC + 骨架 + build | Codex 審 spec：有條件通過 → 已修訂（draft 2） |
-| S1 | engine（含 validateData/normalize）+ milp + 甘特圖（唯讀）+ 資料分頁（表格編輯，不含拖曳） | (a) PPT 實例 MILP：`GLP_OPT`、Z=5、W=11；(b) greedy fixture Z=4、W=5；(c) 不可行 fixture 回報 §1.3 的 4 條違規且無多報；(d) `validateData` 覆蓋：calibMin=0、負校準、重複 req、`end==window.end`、相鄰 visibility 合併、H 尾端通訊合法但校準跨 H、無候選需求之空解；(e) 同一 Schedule 經 MILP 轉換與 `score` 三欄一致 |
+| S1 | engine（含 validateData/normalize）+ milp（含版本閘門）+ 甘特圖（唯讀）+ 資料分頁（表格編輯，不含拖曳） | (a) PPT 實例 MILP：`GLP_OPT`、`checkFeasible.ok`、不同需求數 5、W=11（不強制列順序或特定等分最佳配置）；(b) greedy fixture 的 Schedule 集合恰等於 §1.3；(c) 不可行 fixture 的違規集合（reqs 成對排序後）恰等於 §1.3 的 4 條，R2/R4 不得額外報 rule 1；(d) §8.1 邊界 fixture D 全表；(e) §8.2 MILP 轉換 oracle；(f) §8.3 版本閘門；(g) §8.4 UI 驗收 |
 | S2 | GA 兩種編碼 + 實驗分頁 + 產生器 | PPT 實例、固定 seeds 與預設參數：20 runs 命中 (5,11) 100%（經驗驗收，非演算法保證）；30 需求隨機實例 GA 與 MILP（tmlim 30s）差距可報告；取消後舊結果不覆蓋解槽 |
 | S3 | 動畫 + 甘特圖拖曳 + 時窗拖曳 + 播放控制 | 三解槽皆可播放；拖出違規即時標紅；擬合殘差顯示 |
 | S4 | 匯出、主題切換、localStorage 降級、授權聲明、收尾 | 單檔離線驗收紀錄：Chrome/Edge 版本、file://、斷網、smoke z=3 且 `GLP_OPT`、GA worker 啟動／取消、無外部請求、儲存失敗不阻止操作；全部匯出可用；授權文字齊備 |
+
+### 8.1 S1 邊界 fixture D（每一測例由全新 D 複本獨立修改，不累積）
+
+```json
+{
+  "meta":{"name":"S1 boundaries","timeOrigin":"10:00","horizonMin":10,"calibDefaultMin":2},
+  "bands":["S","X"],
+  "satellites":[{"id":"SAT_A","color":"#4f8ef7"},{"id":"SAT_B","color":"#f28b5b"}],
+  "stations":[{"id":"G","angleDeg":0,"antennas":[{"id":"A","band":"S","calibMin":null}]}],
+  "visibility":[
+    {"sat":"SAT_A","station":"G","start":0,"end":10},
+    {"sat":"SAT_B","station":"G","start":0,"end":10}
+  ],
+  "requests":[
+    {"id":"R1","sat":"SAT_A","band":"S","durMin":2,"start":0,"end":10},
+    {"id":"R2","sat":"SAT_B","band":"S","durMin":2,"start":0,"end":10}
+  ]
+}
+```
+
+記法 `R/A/t` = `{req:R, antenna:A, start:t}`。
+
+| 測例與完整變更 | 資料驗證／正規化預期 | 候選／排程預期 |
+|---|---|---|
+| D 原樣（calibMin=null；另獨立測刪除 calibMin 欄） | `validateData.ok=true`；A 有效校準 = 2 | `[R1/A/0, R2/A/2]` 僅有 `{rule:2, reqs:[R1,R2]}`，ok=false |
+| A.calibMin=0 | ok=true；有效校準 = 0 | 同上排程 ok=true、violations=[]，不得錯用全域 2 |
+| A.calibMin=−1；另獨立測 meta.calibDefaultMin=−1 | ok=false，errors 非空且指到該欄位 | 停止 normalize／求解，不靜默變成 0 或預設 |
+| requests 追加另一筆 id=R1 | ok=false，錯誤指向重複需求 id | 不求解 |
+| D 不改，只給 `[R1/A/0, R1/A/4]` | ok=true | `checkFeasible.ok=false`，只有 `'duplicate-request'`，無其他違規 |
+| R1.end=6 且 SAT_A visibility.end=6 | ok=true | `feasibleStarts(R1,A)` 恰為 [0,1,2,3,4]；R1/A/4（end=6）ok=true |
+| SAT_A visibility 改為 [0,5)、[5,10) | ok=true；normalize 後 SAT_A/G 恰為單段 [0,10) | `feasibleStarts(R1,A)` 恰為 0..8；R1/A/4 跨接點仍 ok=true |
+| D 原樣，只給 `[R1/A/8]` | ok=true | end=10=H，校準到 12；t=8 ∈ feasibleStarts，ok=true |
+| requests 僅保留 R1 且 R1.durMin=11 | ok=true（無候選 ≠ 資料不合法） | `feasibleStarts(R1,A)=[]`；空排程 ok=true，score=`{assigned:0,totalWait:0,objective:0,feasible:true}`；求解回傳已證明最佳的空解，可不呼叫零變數 GLPK |
+
+### 8.2 S1 MILP 轉換 oracle
+以完整 default.json 建立全部候選變數，將 `x[R1,GS_1-S,0]`、`x[R2,GS_2-X,5]`、`x[R3,GS_2-S,8]`、`x[R6,GS_2-X,22]`、`x[R5,GS_1-S,24]` 設為 1、其他為 0。轉換後 Schedule 集合須恰為這五個元素；`checkFeasible.ok=true`；整數 assigned=5、totalWait=11、objective=1194/241（容差 1e−9）。直接對同一手寫 Schedule 呼叫 `score` 須得到相同三欄。再以貪婪 fixture 的四個 x=1 重做：assigned=4、totalWait=5、objective=959/241、feasible=true。S2 再對兩種 GA phenotype 做同樣一致性驗收。
+
+### 8.3 S1 版本閘門測試
+以 §8.1 的 D 僅保留 R1，revision=1 啟動 MILP；在回覆前刪除 SAT_A 全部 visibility 並提交為 revision=2，再送回舊 run 的 R1/A/0 可行結果。預期 MILP 解槽及 revision=2 的求解狀態完全不受舊訊息更新。另測取消後、以及新 run 啟動後舊 run 的完成／失敗訊息，預期同樣丟棄。以受控 worker stub 決定訊息順序，不依真實求解速度。
+
+### 8.4 S1 UI 驗收
+以 default.json 開啟單檔：資料表顯示 3 衛星／2 站／3 天線／6 可見時窗／6 需求；MILP 結果的唯讀甘特圖有三天線列、五個通訊區塊及對應校準；手寫排程 R1=0、R2=5、R3=8、R6=22、R5=24 依資料正確呈現。在表格把 R1.durMin 由 5 改為 7 並提交：驗證成功，但 R1 已無法與 R2 共存，新 MILP 須 `GLP_OPT`、Z=5、W=14（例如 R1/GS_2-S/3、R3/GS_1-S/6、R4/GS_2-X/11、R6/GS_2-X/23、R5/GS_1-S/25；工程方以 `tools/enumerate.py` 全列舉確認 (5,14) 為最佳），且不得仍顯示舊 (5,11) 為當前版本結果。負時長提交須被拒並顯示欄位錯誤。
+
+參考 oracle：`tools/enumerate.py <data.json> [REQ=dur]` 以純 Python 全列舉可行排程並回報最佳 (Z, W)，供驗收時獨立核對（非 engine 實作）。
 
 每個 Sprint 結束：`node build.js` → `dist/index.html` 可開 → 寫 `docs/REVIEW_REQUEST_<sprint>.md` + `docs/REVIEW_PROMPT_<sprint>.md`（記錄被審 commit SHA）→ Codex 審 → 回覆寫 `docs/reviews/<sprint>-codex.md` → 工程方逐項回應於 `docs/reviews/<sprint>-response.md` 並更新 DECISIONS.md。
 
