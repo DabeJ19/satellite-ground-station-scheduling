@@ -92,3 +92,9 @@
 | 時間預算 | 80/20 配額 + deadline 實際剩餘；不標「超時」 | B6 |
 | 測試 | browser 測試硬斷言、非零退出；UI 閘門以可注入 GLPK factory 測實際路徑 | B7 |
 | metadata 欄位定位、儲存失敗提示 | 採納 | A1、A2 |
+
+## 2026-10-17 S1-r2 審查後
+| 項目 | 決定 | 原因 |
+|---|---|---|
+| 錯誤訊息格式化 | 所有來自輸入的值一律經 `engine.fmt()`，不對物件呼叫 String() | N1：`{"toString":null}` 會讓 String() 拋錯 |
+| 工作環境 | PO 決定暫時維持 Cowork（雲端工作區 + GitHub）方式；Claude Code CLI 本機環境待權限問題解決後再評估 | 工作機 PowerShell 執行政策與無 Node |

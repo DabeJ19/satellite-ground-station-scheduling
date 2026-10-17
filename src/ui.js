@@ -414,7 +414,7 @@
   const palette = (i) => PAL[((i % PAL.length) + PAL.length) % PAL.length];
 
   // ---------- 工具 ----------
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  function esc(s) { const str = (s == null) ? '' : (typeof s === 'object' ? E.fmt(s) : String(s)); return str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   function cssEsc(s) { return String(s).replace(/["\\]/g, '\\$&'); }
   function download(name, text, type) { downloadBlob(name, new Blob([text], { type })); }
   function downloadBlob(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
@@ -453,6 +453,7 @@
     getDraft: () => state.draft,
     _setGLPKFactory: (fn) => { destroyGLPK(); glpkFactory = fn; },
     _glpkDebug: () => ({ inst: glpkInst, pending: !!glpkPromise, gen: glpkGen }),
+    _warmGLPK: () => initGLPK(),   // 模擬 boot 的閒置初始化（測試用）
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

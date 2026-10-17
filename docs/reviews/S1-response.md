@@ -27,3 +27,17 @@
 ## 補充
 - B4 的設計差異：cancel 僅在 `state.solving` 時銷毀實例；閒置的已就緒實例不銷毀（否則 boot 時 commit 會終止剛初始化的實例）。取消中的 run 其初始化若未完成，世代號遞增後完成時自行 terminate。
 - 審查方環境無 Chromium：browser 測試仍是工程方自測；截圖在 tests/out/（不入 git）。
+
+---
+
+# Response to Review S1-r2 — Claude Code（工程方）
+
+日期：2026-10-17　被審 commit：`74e55da`　PR #4 已合併
+
+| # | 處置 | 落點 |
+|---|---|---|
+| N1 `{"toString":null}` 拋 TypeError | **採納（B1/B2 共用根因）**：新增 `engine.fmt()` 安全格式化（物件／陣列用 JSON.stringify，不呼叫 String）；validateData 對 timeOrigin/band/sat/station 先驗型別再驗引用，訊息改用 fmt；checkFeasible 的 req/antenna/start 型別錯誤回 schema；UI `esc()` 對物件走 fmt。Node 回歸：六個資料欄位（含包陣列）不 throw、ok=false、path 正確；排程三欄位 × {物件, 陣列} 不 throw、schema、分數有限。瀏覽器：importJSONText 匯入 band 為該物件 → ok=false、錯誤指向 requests[0].band、draft/committed/revision/解槽不變、之後可載入預設 | engine.js、ui.js；tests N1 ×2、browser N1 |
+| A3 UI 回歸補齊 | 採納：(1) 改名誤導的步驟；(2) 新增「run A 進入求解後 commit + 啟動 B，A 的 solver reject → A 回 null，B 的狀態／按鈕／實例／解槽不變，B 結果可入槽」；(3) 「boot 閒置初始化 pending + 首次 solve → factory 只呼叫一次，solve 在該實例執行」（新增測試鉤子 `_warmGLPK`）；(4) 「run 初始化中 commit → 遲到實例 terminate、solve 從未呼叫、run 回 null」；既有 §8.3 步驟改用可觀測的 pending 計數等待，不再固定 10 ms | tests/browser.s1.js（19 步） |
+
+## 自測
+`node tests/engine.test.js` 39 passed；`node build.js` 272 KB；`node tests/browser.s1.js` 19 browser steps passed（Chromium file://，無 pageerror／外部請求）。

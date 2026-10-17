@@ -310,6 +310,37 @@ test('score/checkFeasible on non-array schedule → controlled error, no throw',
   assert.strictEqual(fe.ok, false);
 });
 
+// ===================== N1 =====================
+section('N1 {"toString":null} values never throw');
+const BAD = JSON.parse('{"toString":null}');
+test('six data fields set to the object → ok=false at that path, no throw', () => {
+  const cases = [['requests[0].band', (d) => { d.requests[0].band = BAD; }], ['meta.timeOrigin', (d) => { d.meta.timeOrigin = BAD; }],
+    ['stations[0].antennas[0].band', (d) => { d.stations[0].antennas[0].band = BAD; }], ['visibility[0].sat', (d) => { d.visibility[0].sat = BAD; }],
+    ['visibility[0].station', (d) => { d.visibility[0].station = BAD; }], ['requests[0].sat', (d) => { d.requests[0].sat = BAD; }]];
+  for (const [path, mut] of cases) {
+    const d = clone(DEFAULT); mut(d);
+    let v; assert.doesNotThrow(() => { v = E.validateData(d); }, path);
+    assert.strictEqual(v.ok, false, path);
+    assert.ok(v.errors.some((e) => e.path === path), path + ' ' + JSON.stringify(v.errors));
+    assert.throws(() => E.normalize(d));
+  }
+  const d = clone(DEFAULT); d.requests[0].band = [BAD];
+  const v = E.validateData(d); assert.strictEqual(v.ok, false); assert.ok(v.errors.some((e) => e.path === 'requests[0].band'));
+});
+test('schedule req/antenna/start set to the object (and wrapped in array) → schema, finite score, no throw', () => {
+  const norm = E.normalize(DEFAULT);
+  for (const bad of [BAD, [BAD]]) {
+    for (const s of [[{ req: bad, antenna: 'GS_1-S', start: 0 }], [{ req: 'R1', antenna: bad, start: 0 }], [{ req: 'R1', antenna: 'GS_1-S', start: bad }]]) {
+      let fe, sc;
+      assert.doesNotThrow(() => { fe = E.checkFeasible(norm, s); sc = E.score(norm, s); });
+      assert.strictEqual(fe.ok, false);
+      assert.strictEqual(fe.violations[0].rule, 'schema');
+      assert.deepStrictEqual([sc.assigned, sc.feasible], [0, false]);
+      assert.ok(Number.isFinite(sc.objective) && sc.error);
+    }
+  }
+});
+
 // ===================== B3 / B6 =====================
 section('B3 incumbent validity, LP isolation; B6 deadline');
 const fakeGlpk = (solveFn) => Object.assign({}, M.K, { solve: solveFn });

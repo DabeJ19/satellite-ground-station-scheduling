@@ -10,6 +10,16 @@
   const isPosInt = (v) => isInt(v) && v > 0;
   const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   const isId = (v) => typeof v === 'string' && v.length > 0;
+  // 安全格式化：對物件／陣列不呼叫 String()（{"toString":null} 會拋 TypeError）
+  function fmt(v) {
+    if (v === null) return 'null';
+    if (v === undefined) return 'undefined';
+    const t = typeof v;
+    if (t === 'string') return JSON.stringify(v);
+    if (t === 'number' || t === 'boolean' || t === 'bigint') return String(v);
+    if (t === 'symbol' || t === 'function') return '<' + t + '>';
+    try { const j = JSON.stringify(v); return j.length > 80 ? j.slice(0, 77) + '...' : j; } catch (_) { return '<object>'; }
+  }
 
   // ---------- validateData (§2.1) ----------
   // 任何 JSON 值都回 {ok,errors}，不拋例外。先驗型別再遍歷。
@@ -23,7 +33,7 @@
     if (meta && !isPosInt(meta.horizonMin)) err('meta.horizonMin', 'H 必須為正整數');
     if (meta && !isNonNegInt(meta.calibDefaultMin)) err('meta.calibDefaultMin', '全域校準必須為非負整數');
     if (meta && meta.name != null && typeof meta.name !== 'string') err('meta.name', '名稱必須為字串');
-    if (meta && meta.timeOrigin != null && !/^\d{1,2}:\d{2}$/.test(String(meta.timeOrigin))) err('meta.timeOrigin', '時間原點格式須為 HH:MM');
+    if (meta && meta.timeOrigin != null && (typeof meta.timeOrigin !== 'string' || !/^\d{1,2}:\d{2}$/.test(meta.timeOrigin))) err('meta.timeOrigin', '時間原點須為 HH:MM 字串');
 
     const arr = (key) => {
       if (!Array.isArray(data[key])) { err(key, `${key} 必須為陣列`); return []; }
@@ -59,7 +69,7 @@
         if (!isId(a.id)) err(`${q}.id`, '天線 id 必須為非空字串');
         else if (antIds.has(a.id)) err(`${q}.id`, `天線 id 重複：${a.id}`);
         else antIds.add(a.id);
-        if (!isId(a.band) || !bandSet.has(a.band)) err(`${q}.band`, `頻段不存在：${String(a.band)}`);
+        if (!isId(a.band)) err(`${q}.band`, `頻段必須為非空字串：${fmt(a.band)}`); else if (!bandSet.has(a.band)) err(`${q}.band`, `頻段不存在：${fmt(a.band)}`);
         if (a.calibMin != null && !isNonNegInt(a.calibMin)) err(`${q}.calibMin`, '天線校準必須為非負整數或 null');
       });
     });
@@ -67,8 +77,8 @@
     arr('visibility').forEach((v, i) => {
       const p = `visibility[${i}]`;
       if (!isObj(v)) { err(p, '時窗必須為物件'); return; }
-      if (!isId(v.sat) || !satIds.has(v.sat)) err(`${p}.sat`, `衛星不存在：${String(v.sat)}`);
-      if (!isId(v.station) || !stIds.has(v.station)) err(`${p}.station`, `地面站不存在：${String(v.station)}`);
+      if (!isId(v.sat)) err(`${p}.sat`, `衛星 id 必須為非空字串：${fmt(v.sat)}`); else if (!satIds.has(v.sat)) err(`${p}.sat`, `衛星不存在：${fmt(v.sat)}`);
+      if (!isId(v.station)) err(`${p}.station`, `地面站 id 必須為非空字串：${fmt(v.station)}`); else if (!stIds.has(v.station)) err(`${p}.station`, `地面站不存在：${fmt(v.station)}`);
       checkWindow(v, p, H, err);
     });
 
@@ -79,8 +89,8 @@
       if (!isId(r.id)) err(`${p}.id`, '需求 id 必須為非空字串');
       else if (reqIds.has(r.id)) err(`${p}.id`, `需求 id 重複：${r.id}`);
       else reqIds.add(r.id);
-      if (!isId(r.sat) || !satIds.has(r.sat)) err(`${p}.sat`, `衛星不存在：${String(r.sat)}`);
-      if (!isId(r.band) || !bandSet.has(r.band)) err(`${p}.band`, `頻段不存在：${String(r.band)}`);
+      if (!isId(r.sat)) err(`${p}.sat`, `衛星 id 必須為非空字串：${fmt(r.sat)}`); else if (!satIds.has(r.sat)) err(`${p}.sat`, `衛星不存在：${fmt(r.sat)}`);
+      if (!isId(r.band)) err(`${p}.band`, `頻段必須為非空字串：${fmt(r.band)}`); else if (!bandSet.has(r.band)) err(`${p}.band`, `頻段不存在：${fmt(r.band)}`);
       if (!isPosInt(r.durMin)) err(`${p}.durMin`, '時長必須為正整數');
       checkWindow(r, p, H, err);
     });
@@ -204,9 +214,9 @@
       if (!isObj(it)) { add('schema', [label], `第 ${i} 筆不是物件`); return; }
       const r = isId(it.req) ? norm.reqById.get(it.req) : undefined;
       const a = isId(it.antenna) ? norm.antById.get(it.antenna) : undefined;
-      if (!r) { add('schema', [label], `未知需求：${String(it.req)}`); return; }
-      if (!a) { add('schema', [r.id], `未知天線：${String(it.antenna)}`); return; }
-      if (!isNonNegInt(it.start)) { add('schema', [r.id], `起始必須為非負整數：${String(it.start)}`); return; }
+      if (!r) { add('schema', [label], isId(it.req) ? `未知需求：${fmt(it.req)}` : `需求 id 型別錯誤：${fmt(it.req)}`); return; }
+      if (!a) { add('schema', [r.id], isId(it.antenna) ? `未知天線：${fmt(it.antenna)}` : `天線 id 型別錯誤：${fmt(it.antenna)}`); return; }
+      if (!isNonNegInt(it.start)) { add('schema', [r.id], `起始必須為非負整數：${fmt(it.start)}`); return; }
       if (seenReq.has(r.id)) { add('duplicate-request', [r.id], `需求重複排入：${r.id}`); return; }
       seenReq.add(r.id);
       tasks.push({ req: r, ant: a, start: it.start, end: it.start + r.durMin });
@@ -326,6 +336,6 @@
 
   SGS.engine = {
     validateData, normalize, expandAntennas, feasibleStarts, checkFeasible, score, compareScores,
-    greedyDecode, mulberry32, minutesToHHMM, visSegments,
+    greedyDecode, mulberry32, minutesToHHMM, visSegments, fmt,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

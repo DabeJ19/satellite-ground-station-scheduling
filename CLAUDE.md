@@ -9,7 +9,7 @@
 4. `docs/reviews/` 最新的 `S<n>-codex*.md` 與 `S<n>-response.md` — 目前審查狀態
 
 ## 目前狀態（更新於每次送審）
-- S0 規格：通過。S1（engine + MILP + 甘特圖 + 資料表格）：第一輪退回 7 項，已修正，**S1-r2 待 Codex 複審**（被審 commit `74e55da`）。
+- S0 規格：通過。S1（engine + MILP + 甘特圖 + 資料表格）：r1 退回 7 項、r2 退回 1 項（N1），皆已修正，**S1-r3 待 Codex 複審**。
 - 下一步：S1-r2 通過 → S2（GA 兩種編碼 + 實驗分頁 + 產生器），見 SPEC §5、§8。
 
 ## 指令

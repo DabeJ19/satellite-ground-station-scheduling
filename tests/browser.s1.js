@@ -180,7 +180,7 @@ async function step(name, fn) {
       assert.strictEqual(r.resA, null);
       assert.strictEqual(r.btn, false);
     });
-    await step('§8.3: old run result after commit (rev+1) is dropped; stale failure too; new run accepted', async () => {
+    await step('§8.3: old run result after commit (rev+1) is dropped; new run accepted', async () => {
       const r = await page.evaluate(async () => {
         const deferred = [];
         const inst = Object.assign({}, SGS.milp.K, { version: 'T', solve: () => new Promise((resolve, reject) => deferred.push({ resolve, reject })), terminate: () => {} });
@@ -188,8 +188,9 @@ async function step(name, fn) {
         const built = SGS.milp.buildLP(SGS.app.state.norm);
         const vals = {}; built.vars.forEach((v) => { vals[v.name] = (v.req === 'R1' && v.antenna === 'GS_1-S' && v.start === 0) ? 1 : 0; });
         const z = 1;
+        const waitFor = (f) => new Promise((res) => { const t = setInterval(() => { if (f()) { clearInterval(t); res(); } }, 1); });
         const p1 = SGS.app.solveMILP();                               // run1 @ rev r
-        await new Promise((r) => setTimeout(r, 10));
+        await waitFor(() => deferred.length === 1);
         const before = JSON.stringify(SGS.app.state.slots.milp && SGS.app.state.slots.milp.schedule);
         const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.visibility = d.visibility.filter((v) => v.sat !== 'SAT_A');
         SGS.app.loadData(d);                                          // rev r+1 → run1 失效（worker 已 terminate）
@@ -199,7 +200,7 @@ async function step(name, fn) {
         const afterOld = { slot: JSON.stringify(SGS.app.state.slots.milp && SGS.app.state.slots.milp.schedule), status: document.getElementById('milpStatus').innerText };
         // 新 run2 @ rev r+1
         const p2 = SGS.app.solveMILP();
-        await new Promise((r) => setTimeout(r, 10));
+        await waitFor(() => deferred.length === 2);
         const ok2 = deferred.length;
         deferred[deferred.length - 1].resolve({ result: { status: SGS.milp.K.GLP_OPT, vars: {}, z: 0 } }); // OPT 空解（不觸發 LP）
         const res2 = await p2;
@@ -213,6 +214,86 @@ async function step(name, fn) {
       assert.strictEqual(r.slotSched, '[]');
       assert.strictEqual(r.res2kind, 'opt');
       assert.ok(r.status.includes('r' + r.rev));
+    });
+    await step('N1: import with band={"toString":null} → ok=false at requests[0].band, state untouched, default loads after', async () => {
+      await page.click('#btnLoadDefault');
+      const before = await page.evaluate(() => ({ rev: SGS.app.state.revision, d: JSON.stringify(SGS.app.state.data), draft: JSON.stringify(SGS.app.getDraft()), slot: JSON.stringify(SGS.app.state.slots.milp && SGS.app.state.slots.milp.schedule) }));
+      const r = await page.evaluate(() => {
+        const d = JSON.parse(JSON.stringify(window.SGS_DEFAULT_DATA)); d.requests[0].band = JSON.parse('{"toString":null}');
+        let v; try { v = SGS.app.importJSONText(JSON.stringify(d)); } catch (e) { return { threw: String(e) }; }
+        return { ok: v.ok, err: document.getElementById('dataErrors').innerText };
+      });
+      assert.strictEqual(r.threw, undefined, r.threw);
+      assert.strictEqual(r.ok, false); assert.ok(r.err.includes('requests[0].band'), r.err);
+      const after = await page.evaluate(() => ({ rev: SGS.app.state.revision, d: JSON.stringify(SGS.app.state.data), draft: JSON.stringify(SGS.app.getDraft()), slot: JSON.stringify(SGS.app.state.slots.milp && SGS.app.state.slots.milp.schedule) }));
+      assert.deepStrictEqual(after, before);
+      assert.strictEqual(await page.evaluate(() => SGS.app.loadData(window.SGS_DEFAULT_DATA).ok), true);
+    });
+    await step('A3: run A solver rejects after commit + run B started → A null; B state/ownership intact; B result lands', async () => {
+      const r = await page.evaluate(async () => {
+        const waitFor = (f) => new Promise((res) => { const t = setInterval(() => { if (f()) { clearInterval(t); res(); } }, 1); });
+        const pend = []; const term = [];
+        const inst = Object.assign({}, SGS.milp.K, { version: 'A3', solve: () => new Promise((resolve, reject) => pend.push({ resolve, reject })), terminate: () => term.push('t') });
+        SGS.app._setGLPKFactory(() => Promise.resolve(inst));
+        const pA = SGS.app.solveMILP();
+        await waitFor(() => pend.length === 1);                       // A 已進入求解
+        const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.meta.name = 'rev+1';
+        SGS.app.loadData(d);                                           // 新版本 → A 失效，實例被 terminate
+        const pB = SGS.app.solveMILP();
+        await waitFor(() => pend.length === 2);                       // B 已進入求解
+        const snap = () => ({ status: document.getElementById('milpStatus').innerText, btn: document.getElementById('btnSolve').disabled, inst: SGS.app._glpkDebug().inst && SGS.app._glpkDebug().inst.version, slot: JSON.stringify(SGS.app.state.slots.milp && SGS.app.state.slots.milp.schedule) });
+        const beforeReject = snap();
+        pend[0].reject(new Error('old run failed'));                   // A 的 solver 失敗（遲到）
+        const resA = await pA;
+        const afterReject = snap();
+        pend[1].resolve({ result: { status: SGS.milp.K.GLP_OPT, vars: {}, z: 0 } });
+        const resB = await pB;
+        return { resA, same: JSON.stringify(beforeReject) === JSON.stringify(afterReject), afterReject, resBkind: resB && resB.label.kind, slotRev: SGS.app.state.slots.milp.revision, rev: SGS.app.state.revision, term: term.length };
+      });
+      assert.strictEqual(r.resA, null);
+      assert.strictEqual(r.same, true, JSON.stringify(r.afterReject));
+      assert.strictEqual(r.afterReject.btn, true, 'B still running');
+      assert.strictEqual(r.resBkind, 'opt');
+      assert.strictEqual(r.slotRev, r.rev);
+    });
+    await step('A3: boot-style idle init pending + first solve → factory called once, solve runs on that instance', async () => {
+      const r = await page.evaluate(async () => {
+        const waitFor = (f) => new Promise((res) => { const t = setInterval(() => { if (f()) { clearInterval(t); res(); } }, 1); });
+        let factoryCalls = 0; let release = null; const started = [];
+        SGS.app._setGLPKFactory(() => { factoryCalls++; return new Promise((res) => { release = res; }); });
+        SGS.app._warmGLPK();                                           // boot 的閒置初始化（pending）
+        await waitFor(() => release !== null);
+        const inst = Object.assign({}, SGS.milp.K, { version: 'boot', solve: async () => { started.push('boot'); return { result: { status: SGS.milp.K.GLP_OPT, vars: {}, z: 0 } }; }, terminate: () => {} });
+        const p = SGS.app.solveMILP();                                 // 首次 solve 共用同一個初始化
+        await new Promise((r) => setTimeout(r, 0));
+        const callsBeforeRelease = factoryCalls;
+        release(inst);
+        const res = await p;
+        return { callsBeforeRelease, factoryCalls, started, kind: res && res.label.kind };
+      });
+      assert.strictEqual(r.callsBeforeRelease, 1); assert.strictEqual(r.factoryCalls, 1);
+      assert.deepStrictEqual(r.started, ['boot']); assert.strictEqual(r.kind, 'opt');
+    });
+    await step('A3: commit while a run is initializing → late instance terminated, solve never called, run returns null', async () => {
+      const r = await page.evaluate(async () => {
+        const waitFor = (f) => new Promise((res) => { const t = setInterval(() => { if (f()) { clearInterval(t); res(); } }, 1); });
+        let release = null; const started = []; const term = [];
+        SGS.app._setGLPKFactory(() => new Promise((res) => { release = res; }));
+        const p = SGS.app.solveMILP();                                 // run：初始化 pending
+        await waitFor(() => release !== null);
+        const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.meta.name = 'during-init';
+        SGS.app.loadData(d);                                           // 初始化中 commit → run 失效
+        const late = Object.assign({}, SGS.milp.K, { version: 'late', solve: () => { started.push('late'); return new Promise(() => {}); }, terminate: () => term.push('late') });
+        release(late);                                                 // 遲到的初始化完成
+        await waitFor(() => term.includes('late'));
+        const res = await p;
+        return { started, term, res, btn: document.getElementById('btnSolve').disabled };
+      });
+      assert.deepStrictEqual(r.started, []);
+      assert.deepStrictEqual(r.term, ['late']);
+      assert.strictEqual(r.res, null);
+      assert.strictEqual(r.btn, false);
+      await page.evaluate(() => SGS.app._setGLPKFactory(() => window.GLPK()));
     });
     await step('B3 on UI: NOFEAS result does not overwrite existing MILP slot', async () => {
       const r = await page.evaluate(async () => {
