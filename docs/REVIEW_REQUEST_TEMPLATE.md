@@ -16,3 +16,6 @@
 
 ## 已知未完成
 - ...
+
+## 對應的 Codex prompt
+見 `docs/REVIEW_PROMPT_<sprint>.md`（必附）。

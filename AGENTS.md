@@ -14,7 +14,9 @@
 6. 時間一律為相對 `timeOrigin` 的整數分鐘，區間半開 `[start, end)`。
 
 ## 審查請求格式
-見 `docs/REVIEW_REQUEST_TEMPLATE.md`。工程方在 sprint 結束時產出 `docs/REVIEW_REQUEST_<sprint>.md`。
+見 `docs/REVIEW_REQUEST_TEMPLATE.md`。工程方在 sprint 結束時產出兩個檔案：
+- `docs/REVIEW_REQUEST_<sprint>.md`：範圍、自測結果、重點
+- `docs/REVIEW_PROMPT_<sprint>.md`：**可直接貼給 Codex 的完整審查 prompt**（PO 的標準要求，每次審查必附），並同時在對話中貼出
 
 ## 審查回覆格式
 ```
