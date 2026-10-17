@@ -1,6 +1,6 @@
 # Codex 複審 Prompt — S0 draft 3
 
-複審 S0 draft 3。被審 commit `f2109f8`。只新增 `docs/reviews/S0-codex-r3.md`，不改其他檔。
+複審 S0 draft 3。被審 commit `fd43e60`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S0-codex-r3.md`，不改其他檔。
 
 讀：`docs/reviews/S0-response.md` 第二段（r2 回應）→ `SPEC.md` 的 §1.1、§4.2 第 6 點、§5.1、§5.3、§8（含 8.1–8.4）→ `DECISIONS.md` 末段 → `tools/enumerate.py`。
 
