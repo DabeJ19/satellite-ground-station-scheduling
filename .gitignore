@@ -5,3 +5,4 @@ desktop.ini
 *.log
 .vscode/
 .sync-main.bundle
+tests/out/

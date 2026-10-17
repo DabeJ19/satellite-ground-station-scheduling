@@ -16,19 +16,115 @@
     <button data-tab="sched">排程與動畫</button>
   </nav>
   <div class="right">
+    <span class="muted small" id="revInfo"></span>
     <button id="themeToggle" title="切換主題">◐</button>
   </div>
 </header>
 
 <main>
-  <section class="tab" id="tab-data"><h2>資料</h2><p class="muted">S1 實作。</p></section>
-  <section class="tab hidden" id="tab-model"><h2>模型</h2><p class="muted">S1 實作。</p>
-    <div id="s0-smoke" class="card"><b>S0 煙霧測試</b> <span id="glpkStatus">glpk 載入中…</span></div>
+  <!-- ===== 資料 ===== -->
+  <section class="tab" id="tab-data">
+    <div class="toolbar">
+      <button id="btnLoadDefault">載入 PPT 預設資料</button>
+      <button id="btnImport">匯入 JSON</button>
+      <input type="file" id="fileImport" accept="application/json" hidden>
+      <button id="btnExport">匯出 JSON</button>
+      <span class="spacer"></span>
+      <button id="btnRevert" class="ghost">還原未套用變更</button>
+      <button id="btnApply" class="primary">套用變更（驗證 → 新版本）</button>
+    </div>
+    <div id="dataErrors" class="errors hidden"></div>
+
+    <div class="grid2">
+      <div class="card">
+        <h3>基本參數</h3>
+        <div class="form">
+          <label>名稱 <input data-meta="name" type="text"></label>
+          <label>時間原點 <input data-meta="timeOrigin" type="text" placeholder="10:00"></label>
+          <label>時間軸長度 H（分鐘） <input data-meta="horizonMin" type="number" min="1" step="1"></label>
+          <label>全域校準（分鐘） <input data-meta="calibDefaultMin" type="number" min="0" step="1"></label>
+          <label>頻段（逗號分隔） <input data-meta="bands" type="text" placeholder="S, X"></label>
+        </div>
+      </div>
+      <div class="card">
+        <h3>衛星 <button class="mini" data-add="satellites">＋</button></h3>
+        <table class="edit" id="tblSat"><thead><tr><th>id</th><th>顏色</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <h3>地面站 <button class="mini" data-add="stations">＋</button></h3>
+        <table class="edit" id="tblSt"><thead><tr><th>id</th><th>動畫角度°</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <h3>天線 <button class="mini" data-add="antennas">＋</button></h3>
+        <table class="edit" id="tblAnt"><thead><tr><th>地面站</th><th>id</th><th>頻段</th><th>校準（空=全域）</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <h3>飛越時窗 <button class="mini" data-add="visibility">＋</button></h3>
+        <table class="edit" id="tblVis"><thead><tr><th>衛星</th><th>地面站</th><th>start</th><th>end</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <h3>通訊需求 <button class="mini" data-add="requests">＋</button></h3>
+        <table class="edit" id="tblReq"><thead><tr><th>id</th><th>衛星</th><th>頻段</th><th>時長</th><th>start</th><th>end</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+    <p class="muted small">時間為相對時間原點的整數分鐘；區間半開 [start, end)。拖曳編輯與實例產生器於後續 sprint 加入。</p>
   </section>
-  <section class="tab hidden" id="tab-ga"><h2>GA 實驗</h2><p class="muted">S2 實作。</p></section>
-  <section class="tab hidden" id="tab-sched"><h2>排程與動畫</h2><p class="muted">S1 甘特圖、S3 動畫。</p></section>
+
+  <!-- ===== 模型 ===== -->
+  <section class="tab hidden" id="tab-model">
+    <div class="grid2">
+      <div class="card model">
+        <h3>時間索引 MILP</h3>
+        <p>集合：R 需求、A 天線、T = {0,…,H−1}；S(r,a) = 需求 r 在天線 a 的可行起始分鐘集合（已含限制 4、5 與時窗）。<br>
+        變數：x<sub>r,a,t</sub> ∈ {0,1}，t ∈ S(r,a)。ε = 1/(|R|·H+1)。</p>
+        <div class="eq">max&nbsp; Σ<sub>r,a,t</sub> x<sub>r,a,t</sub> − ε Σ<sub>r,a,t</sub> (t − e<sub>r</sub>)·x<sub>r,a,t</sub></div>
+        <div class="eq">s.t.&nbsp; Σ<sub>a,t</sub> x<sub>r,a,t</sub> ≤ 1 <span class="muted">∀r（每需求至多一次）</span></div>
+        <div class="eq">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Σ<sub>r</sub> Σ<sub>t ≤ τ &lt; t+d<sub>r</sub>+c<sub>a</sub></sub> x<sub>r,a,t</sub> ≤ 1 <span class="muted">∀a, ∀τ（限制 1＋2：天線＋校準）</span></div>
+        <div class="eq">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Σ<sub>r: sat(r)=s</sub> Σ<sub>a</sub> Σ<sub>t ≤ τ &lt; t+d<sub>r</sub></sub> x<sub>r,a,t</sub> ≤ 1 <span class="muted">∀s, ∀τ（限制 3：衛星互斥）</span></div>
+        <p class="muted small">e<sub>r</sub> = 需求允許開始的下界；次目標「總等待」權重 ε 小到永不翻轉主目標。求解器：GLPK 5.0（glpk.js，WebAssembly，內嵌）。</p>
+      </div>
+      <div class="card">
+        <h3>求解</h3>
+        <div class="form">
+          <label>時間上限（秒，MILP 80% / LP 鬆弛 20%） <input id="tmlim" type="number" min="1" step="1" value="30"></label>
+        </div>
+        <div class="toolbar">
+          <button id="btnSolve" class="primary">求解 MILP</button>
+          <button id="btnCancel" class="ghost" disabled>取消</button>
+        </div>
+        <div id="milpStatus" class="status"></div>
+        <div id="s0-smoke" class="muted small"><span id="glpkStatus"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== GA ===== -->
+  <section class="tab hidden" id="tab-ga">
+    <div class="card"><h3>GA 實驗</h3><p class="muted">S2 實作：兩種編碼、算子參數、多次 run 統計、收斂曲線。</p></div>
+  </section>
+
+  <!-- ===== 排程與動畫 ===== -->
+  <section class="tab hidden" id="tab-sched">
+    <div class="toolbar">
+      <span>解槽：</span>
+      <div class="seg" id="slotSel">
+        <button data-slot="manual">手動</button>
+        <button data-slot="milp" class="active">MILP</button>
+        <button data-slot="ga">GA</button>
+      </div>
+      <span class="spacer"></span>
+      <button id="btnGanttPng" class="ghost">甘特圖 PNG</button>
+    </div>
+    <div class="cards3" id="scoreCards"></div>
+    <div class="card">
+      <canvas id="gantt" height="320"></canvas>
+      <div id="ganttViol" class="errors hidden"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="card"><h3>衛星繞地示意動畫</h3><p class="muted">S3 實作。</p></div>
+  </section>
 </main>
-<footer class="muted small">build __BUILD_TIME__ · glpk.js 5.0.0 (GPL-3.0) 內嵌 · 離線可用</footer>
+<footer class="muted small">build __BUILD_TIME__ · 內嵌 glpk.js 5.0.0（GPL-3.0，© jvail，https://github.com/jvail/glpk.js；build 僅將 ES module export 改寫為全域變數）· 自有程式碼 MIT · 離線可用、零外部請求</footer>
 
 <!-- @inline:glpk -->
 <!-- @inline:default.json -->
