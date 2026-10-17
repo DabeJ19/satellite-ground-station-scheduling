@@ -110,3 +110,13 @@
 | 產生器 | 參數：seed、衛星數、站數、每站天線數、需求數、時窗密度、H、校準；每衛星至少一段時窗；需求時窗錨定在該衛星某段 visibility 附近 | §3 |
 | 直接編碼起始突變 | 在該天線的 feasibleStarts 索引上 ±2 步移動 | 避免產生明顯時窗外的起始 |
 | C1 | 測試 waitFor 加逾時 | S1-r3 建議 |
+
+## 2026-10-17 S2 審查後修訂（Codex 退回 6 項 → S2-r2）
+| 項目 | 決定 | 原因 |
+|---|---|---|
+| GA run 生命週期 | 單一結案程序 settleRun（取消／過期／錯誤 → null，成功 → results），完成亦 terminate Worker | B1 |
+| 產生器 | 入口驗證拋 Error(errors)；時窗受 H 約束；天線 id 集合去重；輸出必過 validateData | B2 |
+| 世代編號 | 第 0 代 = 初始族群；所有輸出同一編號 | B3 |
+| GA 參數 | 執行前驗證；有效參數快照（resolveParams）回寫並凍結；λ 低於 |R|+1 顯示警示 | B4 |
+| CSV | 曲線與統計皆含批次 runId；summary 含 gapZ | B5、B6 |
+| 違規集合 | decode 保留 violations 集合與 rawFitness | A1 |

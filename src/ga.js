@@ -60,7 +60,7 @@
       ch.pref.forEach((k, i) => { if (k >= 0 && ctx.compat[i][k]) pref.set(ctx.reqs[i].id, ctx.compat[i][k]); });
       const schedule = E().greedyDecode(norm, order, pref);
       const sc = E().score(norm, schedule);
-      return { schedule, score: sc, fitness: sc.objective, feasible: true, violations: 0 };
+      return { schedule, score: sc, fitness: sc.objective, rawFitness: sc.objective, feasible: true, violationCount: 0, violations: [] };
     }
     // direct：依 requests 陣列順序組 phenotype
     const raw = [];
@@ -73,13 +73,14 @@
       const kept = [];
       raw.forEach((it) => { kept.push(it); if (!E().checkFeasible(norm, kept).ok) kept.pop(); });
       const sc = E().score(norm, kept);
-      return { schedule: kept, score: sc, fitness: sc.objective, feasible: true, violations: 0 };
+      return { schedule: kept, score: sc, fitness: sc.objective, rawFitness: sc.objective, feasible: true, violationCount: 0, violations: [] };
     }
-    // penalty
+    // penalty：V = 共用檢查器去重後的違規筆數；保留集合供診斷
     const fe = E().checkFeasible(norm, raw);
     const sc = E().score(norm, raw);
     const V = fe.violations.length;
-    return { schedule: raw, score: sc, fitness: sc.objective - p.lambda * V, rawFitness: sc.objective - p.lambda * V, feasible: fe.ok, violations: V };
+    const raw_f = sc.objective - p.lambda * V;
+    return { schedule: raw, score: sc, fitness: raw_f, rawFitness: raw_f, feasible: fe.ok, violationCount: V, violations: fe.violations };
   }
 
   // ---------- 算子 ----------
@@ -128,42 +129,42 @@
     const ctx = buildContext(norm);
     const rnd = E().mulberry32(p.seed);
     const t0 = nowMs();
-    let pop = Array.from({ length: p.popSize }, () => randomChromosome(ctx, p, rnd));
-    let evals = pop.map((ch) => decode(ctx, p, ch));
     const history = [];
-    let best = null;            // 最佳「可行」phenotype（空排程保底）
-    let bestFit = -Infinity;    // 最佳 fitness（含罰則）
-    let stagnant = 0, gen = 0, stopReason = 'generations', bestGen = 0;
-    const emptyScore = E().score(norm, []);
-    best = { schedule: [], score: emptyScore, gen: 0 };
-    const consider = (ev, g) => {
-      if (ev.feasible && E().compareScores(ev.score, best.score) > 0) { best = { schedule: ev.schedule, score: ev.score, gen: g }; }
-    };
-    evals.forEach((ev) => consider(ev, 0));
-    for (gen = 1; gen <= p.generations; gen++) {
+    let best = { schedule: [], score: E().score(norm, []), gen: 0 };   // 最佳「可行」phenotype（空排程保底）
+    let bestFit = -Infinity, bestGen = 0, stagnant = 0, stopReason = 'generations';
+    const consider = (ev, g) => { if (ev.feasible && E().compareScores(ev.score, best.score) > 0) best = { schedule: ev.schedule, score: ev.score, gen: g }; };
+    // 世代編號統一：初始族群 = 第 0 代；第 k 批子代 = 第 k 代。history / onGeneration / best.gen / bestGen 全用同一編號。
+    const record = (g, evals) => {
       const fits = evals.map((e) => e.fitness);
       const genBest = Math.max(...fits), genAvg = fits.reduce((a, b) => a + b, 0) / fits.length;
-      if (genBest > bestFit + 1e-12) { bestFit = genBest; stagnant = 0; bestGen = gen; } else stagnant++;
-      history.push({ gen, best: genBest, avg: genAvg, bestAssigned: best.score.assigned, bestWait: best.score.totalWait });
-      if (hooks.onGeneration) hooks.onGeneration({ gen, best: genBest, avg: genAvg, bestScore: best.score });
+      if (genBest > bestFit + 1e-12) { bestFit = genBest; stagnant = 0; bestGen = g; } else stagnant++;
+      history.push({ gen: g, best: genBest, avg: genAvg, bestAssigned: best.score.assigned, bestWait: best.score.totalWait });
+      if (hooks.onGeneration) hooks.onGeneration({ gen: g, best: genBest, avg: genAvg, bestScore: best.score });
+      return fits;
+    };
+    let pop = Array.from({ length: p.popSize }, () => randomChromosome(ctx, p, rnd));
+    let evals = pop.map((ch) => decode(ctx, p, ch));
+    let gen = 0;
+    evals.forEach((ev) => consider(ev, 0));
+    let fits = record(0, evals);
+    while (gen < p.generations) {
       if (hooks.shouldStop && hooks.shouldStop()) { stopReason = 'cancelled'; break; }
       if (stagnant >= p.stagnation) { stopReason = 'stagnation'; break; }
-      if (gen === p.generations) break;
-      // 下一代：菁英 + 錦標賽／交叉／突變
       const idx = fits.map((f, i) => i).sort((a, b) => fits[b] - fits[a]);
       const next = idx.slice(0, p.elite).map((i) => clone(pop[i]));
       while (next.length < p.popSize) {
         const a = tournament(pop, fits, p.tournamentK, rnd), b = tournament(pop, fits, p.tournamentK, rnd);
         next.push(mutate(ctx, p, crossover(ctx, p, a, b, rnd), rnd));
       }
-      pop = next;
+      pop = next; gen++;
       evals = pop.map((ch) => decode(ctx, p, ch));
       evals.forEach((ev) => consider(ev, gen));
+      fits = record(gen, evals);
     }
     return {
-      params: p, best, bestFitness: bestFit, bestGen, generations: history.length, stopReason, history,
+      params: p, best, bestFitness: bestFit, bestGen, generations: gen, stopReason, history,
       elapsedMs: nowMs() - t0,
-      lastPopulation: evals.map((e) => ({ feasible: e.feasible, violations: e.violations, score: e.score })),
+      lastPopulation: evals.map((e) => ({ feasible: e.feasible, violationCount: e.violationCount, violations: e.violations, rawFitness: e.rawFitness, score: e.score })),
     };
   }
 

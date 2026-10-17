@@ -62,29 +62,145 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
       assert.deepStrictEqual([r.hitZW, r.hitZ, r.proven], [20, 20, true]);
       assert.ok(r.text.includes('命中最佳率'), r.text.slice(0, 200));
       const lines = r.csv.trim().split('\n');
-      assert.ok(lines[0].startsWith('runIndex,seed,assigned'));
+      assert.ok(lines[0].startsWith('runId,runIndex,seed,assigned'));
       assert.strictEqual(lines.length, 1 + 20 + 1 + 2, 'rows: ' + lines.length);
-      assert.ok(lines[lines.length - 1].startsWith('summary,20,5,11'));
+      assert.ok(/^summary,run\d+,20,5,11/.test(lines[lines.length - 1]), lines[lines.length - 1]);
+      assert.ok(lines[lines.length - 1].endsWith(',true,0'), 'gapZ 0 at end: ' + lines[lines.length - 1]);
       const c = r.curves.trim().split('\n');
-      assert.ok(c[0] === 'runIndex,seed,generation,best,avg,bestAssigned,bestWait' && c.length > 21);
+      assert.strictEqual(c[0], 'runId,runIndex,seed,generation,best,avg,bestAssigned,bestWait'); assert.ok(c.length > 21);
       await page.screenshot({ path: path.join(OUT, 's2-ga-multi.png') });
     });
-    await step('cancel during multi-run → no slot change, status 已取消; data change after cancel keeps old results out', async () => {
+    await step('B1: cancel via button → promise resolves null promptly, status 已取消, slot unchanged', async () => {
       const r = await page.evaluate(async () => {
         const before = JSON.stringify(SGS.app.state.slots.ga.schedule);
         SGS.app.writeGaParams({ generations: 5000, stagnation: 5000, popSize: 200, seed: 1, runs: 50 });
         const p = SGS.app.runGA(50);
         await window.__waitFor(() => SGS.app.state.ga.running && !!SGS.app.state.ga.worker, 'worker started');
-        SGS.app.cancelGA();
+        document.getElementById('btnGaCancel').click();
+        const t0 = Date.now();
+        const res = await Promise.race([p, new Promise((r) => setTimeout(() => r('TIMEOUT'), 2000))]);
         const status = document.getElementById('gaStatus').innerText;
         const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.meta.name = 'after-cancel'; SGS.app.loadData(d);
-        await new Promise((r) => setTimeout(r, 200));
-        const after = JSON.stringify(SGS.app.state.slots.ga.schedule);
-        return { same: before === after, status, running: SGS.app.state.ga.running, btn: document.getElementById('btnGaOne').disabled, slotRev: SGS.app.state.slots.ga.revision, rev: SGS.app.state.revision, pendingResults: SGS.app.state.ga.results.length };
+        await new Promise((r) => setTimeout(r, 100));
+        return { res, ms: Date.now() - t0, status, same: before === JSON.stringify(SGS.app.state.slots.ga.schedule), running: SGS.app.state.ga.running, btn: document.getElementById('btnGaOne').disabled, slotRev: SGS.app.state.slots.ga.revision, rev: SGS.app.state.revision };
       });
-      assert.strictEqual(r.same, true); assert.ok(/已取消/.test(r.status) || true); assert.strictEqual(r.running, false); assert.strictEqual(r.btn, false);
-      assert.strictEqual(r.slotRev, r.rev - 1, 'old slot kept with old revision');
+      assert.strictEqual(r.res, null, 'promise must resolve null, got ' + r.res);
+      assert.ok(/已取消/.test(r.status), r.status);
+      assert.strictEqual(r.same, true); assert.strictEqual(r.running, false); assert.strictEqual(r.btn, false);
+      assert.strictEqual(r.slotRev, r.rev - 1);
       await page.evaluate(() => SGS.app.writeGaParams({ generations: 200, stagnation: 50, popSize: 50, seed: 42, runs: 20 }));
+    });
+    await step('B1 (controlled worker): cancel / commit / replace each settle A with null and terminate(A) exactly once; done terminates too; stale messages ignored', async () => {
+      const r = await page.evaluate(async () => {
+        const log = [];
+        const mk = (id) => { const w = { id, posted: [], terminate() { log.push('terminate:' + id); }, postMessage(m) { w.posted.push(m); }, onmessage: null, onerror: null }; return w; };
+        const workers = [];
+        SGS.app._setWorkerFactory(() => { const w = mk('W' + (workers.length + 1)); workers.push(w); return w; });
+        const out = {};
+        // (1) cancel
+        let pA = SGS.app.runGA(1); const wA = workers[0];
+        SGS.app.cancelGA();
+        out.cancel = { resA: await pA, log: log.slice() };
+        // (2) commit while running
+        log.length = 0; pA = SGS.app.runGA(1); const wB = workers[1];
+        const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.meta.name = 'commit-during-ga'; SGS.app.loadData(d);
+        out.commit = { resA: await pA, log: log.slice() };
+        // (3) replace by new run
+        log.length = 0; pA = SGS.app.runGA(1); const wC = workers[2];
+        const pB = SGS.app.runGA(1); const wD = workers[3];
+        out.replace = { resA: await pA, log: log.slice(), bRunning: SGS.app.state.ga.running, bWorker: SGS.app.state.ga.worker === wD };
+        // stale messages from C after replacement must not affect B
+        const stale = wC.posted[0];
+        wC.onmessage && wC.onmessage({ data: { type: 'done', runId: stale.runId, revision: stale.revision, results: [] } });
+        out.staleIgnored = SGS.app.state.ga.running === true && SGS.app.state.ga.results.length === 0;
+        // (4) success done for D → results, terminate(D) once; duplicate done ignored
+        const m = wD.posted[0];
+        const norm = SGS.app.state.norm;
+        const res = SGS.ga.run(norm, Object.assign({}, m.params, { seed: m.seeds[0] }));
+        const result = { seed: m.seeds[0], best: res.best, bestGen: res.bestGen, generations: res.generations, stopReason: res.stopReason, history: res.history, elapsedMs: 1, params: res.params };
+        log.length = 0;
+        wD.onmessage({ data: { type: 'run-done', runId: m.runId, revision: m.revision, runIndex: 0, result } });
+        wD.onmessage({ data: { type: 'done', runId: m.runId, revision: m.revision, results: [result] } });
+        const resB = await pB;
+        wD.onmessage && wD.onmessage({ data: { type: 'done', runId: m.runId, revision: m.revision, results: [result] } });
+        out.done = { n: resB && resB.length, log: log.slice(), slotZ: SGS.app.state.slots.ga.score.assigned, running: SGS.app.state.ga.running, status: document.getElementById('gaStatus').innerText };
+        // cancel after done must not terminate again
+        SGS.app.cancelGA(); out.afterDoneLog = log.slice();
+        SGS.app._setWorkerFactory(null);
+        return out;
+      });
+      assert.strictEqual(r.cancel.resA, null); assert.deepStrictEqual(r.cancel.log, ['terminate:W1']);
+      assert.strictEqual(r.commit.resA, null); assert.deepStrictEqual(r.commit.log, ['terminate:W2']);
+      assert.strictEqual(r.replace.resA, null); assert.deepStrictEqual(r.replace.log, ['terminate:W3']); assert.ok(r.replace.bRunning && r.replace.bWorker);
+      assert.strictEqual(r.staleIgnored, true);
+      assert.strictEqual(r.done.n, 1); assert.deepStrictEqual(r.done.log, ['terminate:W4']); assert.strictEqual(r.done.slotZ, 5); assert.strictEqual(r.done.running, false);
+      assert.deepStrictEqual(r.afterDoneLog, ['terminate:W4']);
+    });
+    await step('B4: invalid params (popSize=1, elite=20, pc=2) rejected, fields marked, no worker; λ=0 runs with warning; effective params frozen in CSV', async () => {
+      const r = await page.evaluate(async () => {
+        let created = 0; SGS.app._setWorkerFactory(() => { created++; throw new Error('should not create'); });
+        SGS.app.writeGaParams({ encoding: 'direct', directMode: 'penalty', popSize: 1, elite: 20, pc: 2, lambda: 0 });
+        const res = await SGS.app.runGA(1);
+        const bad = { res, created, invalid: Array.from(document.querySelectorAll('[data-ga].invalid')).map((e) => e.dataset.ga).sort(), status: document.getElementById('gaStatus').innerText };
+        SGS.app._setWorkerFactory(null);
+        SGS.app.writeGaParams({ popSize: 10, elite: 2, pc: 0.9, lambda: 0, generations: 20, stagnation: 10, seed: 42, runs: 1 });
+        const ok = await SGS.app.runGA(1);
+        const csv = SGS.app.csvStats();
+        SGS.app.writeGaParams({ popSize: 999 });   // 執行後改控制項，不得改舊批 CSV
+        const csv2 = SGS.app.csvStats();
+        return { bad, okN: ok && ok.length, warn: document.getElementById('gaStatus').innerText, lambda: SGS.app.state.ga.params.lambda, csvLine: csv.split('\n')[1], same: csv === csv2 };
+      });
+      assert.strictEqual(r.bad.res, null); assert.strictEqual(r.bad.created, 0);
+      assert.deepStrictEqual(r.bad.invalid, ['elite', 'pc', 'popSize']);
+      assert.strictEqual(r.okN, 1); assert.ok(/不再保證可行解優先/.test(r.warn), r.warn);
+      assert.strictEqual(r.lambda, 0);
+      const cols = r.csvLine.split(',');
+      assert.strictEqual(cols[16], '10'); assert.strictEqual(cols[22], '2'); assert.strictEqual(cols[23], '0');   // popSize, elite, lambda
+      assert.strictEqual(r.same, true);
+      await page.evaluate(() => SGS.app.writeGaParams({ encoding: 'indirect', directMode: 'repair', lambda: null, popSize: 50, generations: 200, stagnation: 50, seed: 42, runs: 20 }));
+    });
+    await step('B5: two batches with same seed → distinct runId in curve CSV; rows map back to history', async () => {
+      const r = await page.evaluate(async () => {
+        await SGS.app.runGA(1); const c1 = SGS.app.csvCurves(); const id1 = SGS.app.state.ga.runId; const h1 = SGS.app.state.ga.results[0].history;
+        await SGS.app.runGA(1); const c2 = SGS.app.csvCurves(); const id2 = SGS.app.state.ga.runId;
+        const rows = c1.trim().split('\n').slice(1).map((l) => l.split(','));
+        return { id1, id2, allId1: rows.every((x) => x[0] === id1), allId2: c2.trim().split('\n').slice(1).every((l) => l.startsWith(id2 + ',')), n: rows.length, hn: h1.length, first: rows[0], h0: h1[0] };
+      });
+      assert.notStrictEqual(r.id1, r.id2); assert.ok(r.allId1 && r.allId2);
+      assert.strictEqual(r.n, r.hn);
+      assert.deepStrictEqual(r.first.slice(3, 6), [String(r.h0.gen), String(r.h0.best), String(r.h0.avg)]);
+    });
+    await step('B6: incumbent reference (4,5) feas vs GA (5,11) → gapZ −1 shown as GA 多 1 個任務 and in CSV', async () => {
+      const r = await page.evaluate(async () => {
+        const norm = SGS.app.state.norm, data = SGS.app.state.data;
+        const greedy = SGS.engine.greedyDecode(norm, ['R1', 'R2', 'R3', 'R4', 'R5', 'R6']);
+        SGS.app.setSlot('milp', SGS.app.makeSlot(norm, data, greedy, { source: 'MILP', label: { kind: 'feas', text: '有可行解，未證明最佳' } }, SGS.app.state.revision));
+        await SGS.app.runGA(1);
+        const s = SGS.app.state.ga.summary;
+        const text = document.getElementById('gaResult').innerText;
+        const last = SGS.app.csvStats().trim().split('\n').pop();
+        return { gapZ: s.gapZ, text, last, hitLabel: /命中 MILP incumbent 率/.test(text) };
+      });
+      assert.strictEqual(r.gapZ, -1);
+      assert.ok(/gapZ[\s\S]*-1/.test(r.text) && /GA 多 1 個任務/.test(r.text), r.text.slice(0, 400));
+      assert.ok(r.hitLabel);
+      assert.ok(r.last.endsWith(',false,-1'), r.last);
+      await page.evaluate(async () => { await SGS.app.solveMILP(); });
+    });
+    await step('B2 UI: generator rejects nSat=1.5 / H=5 / empty nReq with located errors, revision unchanged; H=10 generates valid data', async () => {
+      await page.evaluate(() => SGS.app.showTab('data'));
+      const rev0 = await page.evaluate(() => SGS.app.state.revision);
+      for (const [field, val, expectPath] of [['nSat', '1.5', 'generator.nSat'], ['H', '5', 'generator.H'], ['nReq', '', 'generator.nReq']]) {
+        await page.evaluate(() => document.querySelectorAll('[data-gen]').forEach((el) => { const d = { seed: 1, nSat: 6, nStation: 3, nAntennaPerStation: 2, nReq: 30, windowDensity: 0.7, H: 120, calibDefaultMin: 10 }; el.value = d[el.dataset.gen]; }));
+        await page.fill(`input[data-gen="${field}"]`, val);
+        await page.click('#btnGenerate');
+        const r = await page.evaluate(() => ({ rev: SGS.app.state.revision, err: document.getElementById('dataErrors').innerText, invalid: !!document.querySelector('[data-gen].invalid') }));
+        assert.strictEqual(r.rev, rev0, field); assert.ok(r.err.includes(expectPath), field + ': ' + r.err); assert.ok(r.invalid, field);
+      }
+      await page.evaluate(() => document.querySelectorAll('[data-gen]').forEach((el) => { const d = { seed: 1, nSat: 6, nStation: 3, nAntennaPerStation: 2, nReq: 30, windowDensity: 0.7, H: 10, calibDefaultMin: 10 }; el.value = d[el.dataset.gen]; }));
+      await page.click('#btnGenerate');
+      const r2 = await page.evaluate(() => ({ rev: SGS.app.state.revision, H: SGS.app.state.norm.H, ok: SGS.app.state.data.visibility.every((v) => v.end <= 10) }));
+      assert.strictEqual(r2.rev, rev0 + 1); assert.strictEqual(r2.H, 10); assert.ok(r2.ok);
     });
     await step('generator seed=1, 30 requests → MILP (tmlim 30) vs GA gap reported', async () => {
       await page.evaluate(() => SGS.app.showTab('data'));

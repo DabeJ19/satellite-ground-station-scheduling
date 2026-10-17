@@ -331,36 +331,56 @@
   // opts: { nSat, nStation, nAntennaPerStation, nReq, windowDensity, bands, H, calibDefaultMin }
   function generateInstance(seed, opts) {
     opts = opts || {};
+    // 入口驗證（B2）：非法輸入拋 Error（含 errors[{path,msg}]），不產生資料
+    const errs = [];
+    const posInt = (k, v, def) => { if (v == null || v === '') return def; if (!isPosInt(v)) errs.push({ path: k, msg: '必須為正整數' }); return v; };
+    const nSat = posInt('nSat', opts.nSat, 4), nSt = posInt('nStation', opts.nStation, 2), nAnt = posInt('nAntennaPerStation', opts.nAntennaPerStation, 2), nReq = posInt('nReq', opts.nReq, 12);
+    let H = opts.H == null || opts.H === '' ? 120 : opts.H; if (!isInt(H) || H < 10 || H > 100000) errs.push({ path: 'H', msg: 'H 必須為 10..100000 的整數' });
+    let density = opts.windowDensity == null || opts.windowDensity === '' ? 0.7 : opts.windowDensity; if (typeof density !== 'number' || !Number.isFinite(density) || density < 0 || density > 1) errs.push({ path: 'windowDensity', msg: '密度必須在 0..1' });
+    let calib = opts.calibDefaultMin == null || opts.calibDefaultMin === '' ? 10 : opts.calibDefaultMin; if (!isNonNegInt(calib)) errs.push({ path: 'calibDefaultMin', msg: '校準必須為非負整數' });
+    if (!isNonNegInt(seed)) errs.push({ path: 'seed', msg: 'seed 必須為非負整數' });
+    const bands = (opts.bands && opts.bands.length ? opts.bands : ['S', 'X']);
+    if (!Array.isArray(bands) || !bands.every(isId) || new Set(bands).size !== bands.length) errs.push({ path: 'bands', msg: '頻段必須為不重複的非空字串' });
+    if (errs.length) { const e = new Error('產生器參數不合法：' + errs.map((x) => x.path).join(', ')); e.errors = errs; throw e; }
+
     const rnd = mulberry32(seed >>> 0);
     const ri = (lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1)); // [lo, hi]
-    const nSat = Math.max(1, opts.nSat || 4), nSt = Math.max(1, opts.nStation || 2), nAnt = Math.max(1, opts.nAntennaPerStation || 2);
-    const nReq = Math.max(1, opts.nReq || 12), density = Math.min(1, Math.max(0, opts.windowDensity == null ? 0.7 : opts.windowDensity));
-    const bands = (opts.bands && opts.bands.length ? opts.bands : ['S', 'X']).map(String);
-    const H = Math.max(10, opts.H || 120), calib = opts.calibDefaultMin == null ? 10 : opts.calibDefaultMin;
     const PAL = ['#4f8ef7', '#f28b5b', '#b48ee0', '#3ccf8e', '#f5b64c', '#e05c8e', '#52c7d8', '#9aa84b'];
     const satellites = Array.from({ length: nSat }, (_, i) => ({ id: 'SAT_' + (i + 1), color: PAL[i % PAL.length] }));
     const stations = Array.from({ length: nSt }, (_, i) => ({ id: 'GS_' + (i + 1), angleDeg: Math.round(360 * i / nSt), antennas: [] }));
-    stations.forEach((st) => { for (let k = 0; k < nAnt; k++) { const b = bands[k % bands.length]; st.antennas.push({ id: `${st.id}-${b}${k >= bands.length ? k + 1 : ''}`, band: b, calibMin: null }); } });
+    const antIds = new Set();
+    stations.forEach((st) => {
+      for (let k = 0; k < nAnt; k++) {
+        const b = bands[k % bands.length];
+        let id = `${st.id}-${k + 1}-${b}`, n = 2;             // 站／序號／頻段；仍以集合保證唯一
+        while (antIds.has(id)) id = `${st.id}-${k + 1}-${b}#${n++}`;
+        antIds.add(id);
+        st.antennas.push({ id, band: b, calibMin: null });
+      }
+    });
+    const maxLen = Math.min(15, H), minLen = Math.min(8, maxLen);
+    const window = () => { const len = ri(minLen, maxLen); const start = ri(0, H - len); return { start, end: start + len }; };
     const visibility = [];
     satellites.forEach((s) => {
       let any = false;
-      stations.forEach((st) => {
-        if (rnd() < density) { const len = ri(8, 15), start = ri(0, Math.max(0, H - len)); visibility.push({ sat: s.id, station: st.id, start, end: start + len }); any = true; }
-      });
-      if (!any) { const st = stations[ri(0, nSt - 1)]; const len = ri(8, 15), start = ri(0, Math.max(0, H - len)); visibility.push({ sat: s.id, station: st.id, start, end: start + len }); }
+      stations.forEach((st) => { if (rnd() < density) { const w = window(); visibility.push({ sat: s.id, station: st.id, start: w.start, end: w.end }); any = true; } });
+      if (!any) { const st = stations[ri(0, nSt - 1)]; const w = window(); visibility.push({ sat: s.id, station: st.id, start: w.start, end: w.end }); }
     });
     const requests = [];
     for (let i = 0; i < nReq; i++) {
       const s = satellites[ri(0, nSat - 1)];
       const vis = visibility.filter((v) => v.sat === s.id);
       const w = vis[ri(0, vis.length - 1)];
-      const dur = ri(2, 5);
+      const dur = Math.min(ri(2, 5), H);
       const slack = ri(2, 8);
       const start = Math.max(0, w.start - ri(0, 3));
       const end = Math.min(H, Math.max(start + dur, w.start + dur + slack));
       requests.push({ id: 'R' + (i + 1), sat: s.id, band: bands[ri(0, bands.length - 1)], durMin: dur, start, end });
     }
-    return { meta: { name: `random seed=${seed} n=${nReq}`, timeOrigin: '10:00', horizonMin: H, calibDefaultMin: calib }, bands, satellites, stations, visibility, requests };
+    const data = { meta: { name: `random seed=${seed} n=${nReq}`, timeOrigin: '10:00', horizonMin: H, calibDefaultMin: calib }, bands: bands.slice(), satellites, stations, visibility, requests };
+    const v = validateData(data);
+    if (!v.ok) { const e = new Error('產生器輸出未通過驗證'); e.errors = v.errors; throw e; }
+    return data;
   }
 
   function minutesToHHMM(norm, m) {

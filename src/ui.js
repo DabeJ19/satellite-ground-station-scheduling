@@ -118,8 +118,11 @@
     $('#btnRevert').onclick = () => { state.draft = clone(state.data); renderDataTab(); showErrors(null); };
     $('#btnGenerate').onclick = () => {
       const o = {};
-      document.querySelectorAll('[data-gen]').forEach((el) => { o[el.dataset.gen] = Number(el.value); });
-      const d = E.generateInstance(o.seed | 0, o);
+      document.querySelectorAll('[data-gen]').forEach((el) => { o[el.dataset.gen] = el.value.trim() === '' ? NaN : Number(el.value); });
+      document.querySelectorAll('[data-gen]').forEach((el) => el.classList.remove('invalid'));
+      let d;
+      try { d = E.generateInstance(o.seed, o); }
+      catch (err) { const errs = err.errors || [{ path: '', msg: String(err && err.message) }]; showErrors(errs.map((e) => ({ path: 'generator.' + e.path, msg: e.msg }))); errs.forEach((e) => { const el = document.querySelector(`[data-gen="${e.path}"]`); if (el) el.classList.add('invalid'); }); return; }
       loadData(d);
     };
     $('#btnApply').onclick = () => applyDraft();
@@ -344,7 +347,9 @@ self.onmessage = function (e) {
   } catch (err) { postMessage({ type: 'error', runId: m.runId, revision: m.revision, error: String(err && err.message || err) }); }
 };`;
   let workerUrl = null;
+  let workerFactory = null;   // 測試可注入受控 worker
   function makeWorker() {
+    if (workerFactory) return workerFactory();
     if (!workerUrl) {
       const src = (root.SGS_SOURCES && root.SGS_SOURCES.engine) ? root.SGS_SOURCES.engine + '\n' + root.SGS_SOURCES.ga + '\n' + WORKER_MAIN : null;
       if (!src) throw new Error('worker 原始碼未內嵌（需經 build.js）');
@@ -359,16 +364,38 @@ self.onmessage = function (e) {
       const k = el.dataset.ga;
       if (k === 'encoding' || k === 'directMode') p[k] = el.value;
       else if (k === 'lambda') p[k] = el.value.trim() === '' ? null : Number(el.value);
-      else p[k] = Number(el.value);
+      else p[k] = el.value.trim() === '' ? NaN : Number(el.value);
     });
     return p;
   }
   function writeGaParams(p) {
-    document.querySelectorAll('[data-ga]').forEach((el) => { const k = el.dataset.ga; if (p[k] != null) el.value = p[k]; });
+    document.querySelectorAll('[data-ga]').forEach((el) => { const k = el.dataset.ga; if (k in p) el.value = p[k] == null ? '' : p[k]; });
+  }
+  // B4：執行前驗證；回 { ok, errors:[{path,msg}] }
+  function validateGaParams(p) {
+    const errors = [];
+    const isInt = Number.isInteger;
+    if (!['indirect', 'direct'].includes(p.encoding)) errors.push({ path: 'encoding', msg: '編碼必須為 indirect 或 direct' });
+    if (!['repair', 'penalty'].includes(p.directMode)) errors.push({ path: 'directMode', msg: '模式必須為 repair 或 penalty' });
+    if (!(p.lambda == null || (Number.isFinite(p.lambda) && p.lambda >= 0))) errors.push({ path: 'lambda', msg: 'λ 必須為非負有限數或留空' });
+    if (!isInt(p.popSize) || p.popSize < 2) errors.push({ path: 'popSize', msg: '族群必須為 ≥ 2 的整數' });
+    if (!isInt(p.generations) || p.generations < 1) errors.push({ path: 'generations', msg: '世代上限必須為 ≥ 1 的整數' });
+    if (!isInt(p.stagnation) || p.stagnation < 1) errors.push({ path: 'stagnation', msg: '停滯代數必須為 ≥ 1 的整數' });
+    if (!(Number.isFinite(p.pc) && p.pc >= 0 && p.pc <= 1)) errors.push({ path: 'pc', msg: '交叉率必須在 0..1' });
+    if (!(Number.isFinite(p.pm) && p.pm >= 0 && p.pm <= 1)) errors.push({ path: 'pm', msg: '突變率必須在 0..1' });
+    if (!isInt(p.tournamentK) || p.tournamentK < 1) errors.push({ path: 'tournamentK', msg: '錦標賽 k 必須為 ≥ 1 的整數' });
+    if (!isInt(p.elite) || p.elite < 0 || (isInt(p.popSize) && p.elite > p.popSize - 1)) errors.push({ path: 'elite', msg: '菁英數必須為 0..族群−1 的整數' });
+    if (!isInt(p.seed) || p.seed < 0 || p.seed > 0xFFFFFFFF) errors.push({ path: 'seed', msg: 'seed 必須為 0..4294967295 的整數' });
+    if (!isInt(p.runs) || p.runs < 1) errors.push({ path: 'runs', msg: 'run 次數必須為 ≥ 1 的整數' });
+    return { ok: errors.length === 0, errors };
+  }
+  function markGaErrors(errors) {
+    document.querySelectorAll('[data-ga]').forEach((el) => el.classList.remove('invalid'));
+    (errors || []).forEach((e) => { const el = document.querySelector(`[data-ga="${e.path}"]`); if (el) el.classList.add('invalid'); });
   }
   function initGA() {
     $('#btnGaOne').onclick = () => runGA(1);
-    $('#btnGaMulti').onclick = () => runGA(Math.max(1, readGaParams().runs | 0));
+    $('#btnGaMulti').onclick = () => runGA(readGaParams().runs);
     $('#btnGaCancel').onclick = () => { cancelGA(); setGaStatus('<span class="badge bad">已取消</span>'); };
     $('#btnGaCsvCurve').onclick = () => download('ga-curves.csv', csvCurves(), 'text/csv');
     $('#btnGaCsvStats').onclick = () => download('ga-stats.csv', csvStats(), 'text/csv');
@@ -378,54 +405,61 @@ self.onmessage = function (e) {
     window.addEventListener('resize', () => { if (!$('#tab-ga').classList.contains('hidden')) drawGaChart(); });
   }
   function setGaStatus(html) { $('#gaStatus').innerHTML = html; }
+
+  // ---- B1：每個 run 一個生命週期物件；結案只執行一次（取消／過期／錯誤 → null；成功 → results）
+  function settleRun(run, value) {
+    if (!run || run.settled) return;
+    run.settled = true;
+    if (run.worker) { try { run.worker.onmessage = null; run.worker.onerror = null; run.worker.terminate(); } catch (_) {} run.worker = null; }
+    if (state.ga.run === run) { state.ga.run = null; state.ga.worker = null; state.ga.running = false; }
+    $('#btnGaOne').disabled = false; $('#btnGaMulti').disabled = false; $('#btnGaCancel').disabled = true;
+    run.resolve(value);
+  }
   function cancelGA() {
     gateGA.cancel();
-    if (state.ga.worker) { try { state.ga.worker.terminate(); } catch (_) {} state.ga.worker = null; }
-    state.ga.running = false;
+    if (state.ga.run) settleRun(state.ga.run, null);
+    state.ga.running = false; state.ga.worker = null;
     $('#btnGaOne').disabled = false; $('#btnGaMulti').disabled = false; $('#btnGaCancel').disabled = true;
   }
 
-  // 回傳 Promise<results|null>（null = 取消或過期）
+  // 回傳 Promise<results|null>（null = 取消、過期或錯誤）
   function runGA(runs) {
     if (!state.norm) return Promise.resolve(null);
     cancelGA();
-    const params = readGaParams(); state.settings.ga = params; saveLS();
+    const input = readGaParams(); input.runs = runs;
+    const v = validateGaParams(input);
+    markGaErrors(v.errors);
+    if (!v.ok) { setGaStatus('<span class="badge bad">參數錯誤</span> ' + v.errors.map((e) => esc(e.path + '：' + e.msg)).join('；')); return Promise.resolve(null); }
     const norm = state.norm, data = state.data, revision = state.revision;   // 快照
+    const effective = Object.freeze(Object.assign({}, SGS.ga.resolveParams(norm, input), { runs }));   // 有效參數快照（含 λ 實值）
+    writeGaParams(effective); state.settings.ga = Object.assign({}, effective); saveLS();
     const runId = gateGA.begin(revision);
-    const seeds = SGS.ga.runSeeds(params.seed >>> 0, runs);
-    const progressEvery = Math.max(1, Math.floor((params.generations || 200) / 50));
-    state.ga = Object.assign(state.ga, { running: true, results: [], curves: [], summary: null, mode: runs > 1 ? 'multi' : 'single', norm, data, revision, params, seeds, runId });
-    $('#btnGaOne').disabled = true; $('#btnGaMulti').disabled = true; $('#btnGaCancel').disabled = false;
-    setGaStatus(`<span class="badge run">執行中…</span> 版本 r${revision}，${runs} 次 run，seeds ${seeds[0]}..${seeds[seeds.length - 1]}`);
-    $('#gaResult').innerHTML = '<span class="muted">執行中…</span>';
+    const seeds = SGS.ga.runSeeds(effective.seed, runs);
+    const progressEvery = Math.max(1, Math.floor(effective.generations / 50));
+    const lambdaWarn = effective.encoding === 'direct' && effective.directMode === 'penalty' && effective.lambda < norm.requests.length + 1;
     let worker;
-    try { worker = makeWorker(); } catch (err) { cancelGA(); setGaStatus(`<span class="badge bad">無法建立 worker</span> ${esc(err.message)}`); return Promise.resolve(null); }
-    state.ga.worker = worker;
-    return new Promise((resolve) => {
-      worker.onmessage = (e) => {
-        const m = e.data;
-        if (!gateGA.accepts(m)) return;                                   // 版本閘門：過期／取消的訊息全部丟棄
-        if (m.type === 'progress') {
-          setGaStatus(`<span class="badge run">執行中…</span> run ${m.runIndex + 1}/${seeds.length}，第 ${m.gen} 代，目前最佳 Z=${m.bestScore.assigned} W=${m.bestScore.totalWait}`);
-          return;
-        }
-        if (m.type === 'run-done') {
-          state.ga.results.push(m.result);
-          state.ga.curves = state.ga.results.map((r) => r.history);
-          drawGaChart();
-          return;
-        }
-        if (m.type === 'error') { cancelGA(); setGaStatus(`<span class="badge bad">GA 錯誤</span> ${esc(m.error)}`); resolve(null); return; }
-        if (m.type === 'done') {
-          state.ga.worker = null; state.ga.running = false;
-          $('#btnGaOne').disabled = false; $('#btnGaMulti').disabled = false; $('#btnGaCancel').disabled = true;
-          finishGA(m.results, norm, data, revision);
-          resolve(m.results);
-        }
-      };
-      worker.onerror = (err) => { if (!gateGA.accepts({ revision, runId })) return; cancelGA(); setGaStatus(`<span class="badge bad">worker 失敗</span> ${esc(err.message || err)}`); resolve(null); };
-      worker.postMessage({ cmd: 'run', data, params, seeds, runId, revision, progressEvery });
-    });
+    try { worker = makeWorker(); } catch (err) { setGaStatus(`<span class="badge bad">無法建立 worker</span> ${esc(err.message)}`); return Promise.resolve(null); }
+    let resolveFn;
+    const promise = new Promise((resolve) => { resolveFn = resolve; });
+    const run = { runId, revision, worker, resolve: resolveFn, settled: false, params: effective, seeds, norm, data };
+    state.ga = Object.assign(state.ga, { running: true, worker, run, results: [], curves: [], summary: null, mode: runs > 1 ? 'multi' : 'single', norm, data, revision, params: effective, seeds, runId, lambdaWarn });
+    $('#btnGaOne').disabled = true; $('#btnGaMulti').disabled = true; $('#btnGaCancel').disabled = false;
+    setGaStatus(`<span class="badge run">執行中…</span> 版本 r${revision}，${runs} 次 run，seeds ${seeds[0]}..${seeds[seeds.length - 1]}${lambdaWarn ? ' <span style="color:var(--warn)">λ 低於 |R|+1，不再保證可行解優先</span>' : ''}`);
+    $('#gaResult').innerHTML = '<span class="muted">執行中…</span>';
+    worker.onmessage = (e) => {
+      const m = e.data;
+      if (run.settled || !gateGA.accepts(m) || m.runId !== runId) return;      // 版本閘門：過期／取消／非本 run 的訊息全部丟棄
+      if (m.type === 'progress') { setGaStatus(`<span class="badge run">執行中…</span> run ${m.runIndex + 1}/${seeds.length}，第 ${m.gen} 代，目前最佳 Z=${m.bestScore.assigned} W=${m.bestScore.totalWait}`); return; }
+      if (m.type === 'run-done') { state.ga.results.push(m.result); state.ga.curves = state.ga.results.map((r) => r.history); drawGaChart(); return; }
+      if (m.type === 'error') { setGaStatus(`<span class="badge bad">GA 錯誤</span> ${esc(m.error)}`); gateGA.cancel(); settleRun(run, null); return; }
+      if (m.type === 'done') {
+        try { finishGA(m.results, run); settleRun(run, m.results); }
+        catch (err) { setGaStatus(`<span class="badge bad">結果處理失敗</span> ${esc(err && err.message)}`); gateGA.cancel(); settleRun(run, null); }
+      }
+    };
+    worker.onerror = (err) => { if (run.settled || !gateGA.accepts({ revision, runId })) return; setGaStatus(`<span class="badge bad">worker 失敗</span> ${esc(err && (err.message || err))}`); gateGA.cancel(); settleRun(run, null); };
+    worker.postMessage({ cmd: 'run', data, params: effective, seeds, runId, revision, progressEvery });
+    return promise;
   }
 
   function gaReference() {
@@ -433,16 +467,16 @@ self.onmessage = function (e) {
     if (!m || m.revision !== state.revision || !m.feasible) return null;
     return { score: m.score, proven: !!(m.meta && m.meta.label && m.meta.label.kind === 'opt') };
   }
-  function finishGA(results, norm, data, revision) {
+  function finishGA(results, run) {
+    const { norm, data, revision } = run;
     state.ga.results = results; state.ga.curves = results.map((r) => r.history);
     const ref = gaReference();
     const summary = SGS.ga.summarize(results, ref);
     state.ga.summary = summary;
     const bestRun = results[summary.bestRunIndex];
-    // GA 解槽：所有 run 的最佳可行 phenotype（再過一次 checkFeasible）
     const fe = E.checkFeasible(norm, bestRun.best.schedule);
-    if (fe.ok) setSlot('ga', makeSlot(norm, data, bestRun.best.schedule, { source: 'GA', label: { kind: 'feas', text: `GA 最佳（${results.length} run）` }, params: state.ga.params, seed: bestRun.seed, bestGen: bestRun.best.gen }, revision));
-    setGaStatus(`<span class="badge opt">完成</span> 版本 r${revision}，${results.length} 次 run`);
+    if (fe.ok) setSlot('ga', makeSlot(norm, data, bestRun.best.schedule, { source: 'GA', label: { kind: 'feas', text: `GA 最佳（${results.length} run）` }, params: run.params, runId: run.runId, seed: bestRun.seed, bestGen: bestRun.best.gen }, revision));
+    setGaStatus(`<span class="badge opt">完成</span> 版本 r${revision}，${results.length} 次 run，runId ${esc(run.runId)}${state.ga.lambdaWarn ? ' <span style="color:var(--warn)">λ 低於 |R|+1，不再保證可行解優先</span>' : ''}`);
     renderGaResult(summary, results, ref);
     drawGaChart();
   }
@@ -458,8 +492,12 @@ self.onmessage = function (e) {
       const name = ref.proven ? '命中最佳率' : '命中 MILP incumbent 率';
       html += `<div>${name}（Z*）<b>${s.hitZ}/${s.runs}</b></div><div>${name}（Z*,W*）<b>${s.hitZW}/${s.runs}</b></div>
         <div>平均達最佳世代（命中者）<b>${f(s.meanGenToHit, 1)}</b></div><div>未命中數<b>${s.missZW}</b></div>`;
-      html += `</div><p class="muted small">參考：MILP ${ref.proven ? '已證明最佳' : '未證明最佳（incumbent）'} (Z*, W*) = (${ref.score.assigned}, ${ref.score.totalWait})，版本 r${state.revision}。${ref.proven ? '' : '未證明最佳時只報對 incumbent 的差距，不稱最佳命中率。'}</p>`;
+      const gapTxt = s.gapZ === 0 ? '相等' : (s.gapZ < 0 ? `GA 多 ${-s.gapZ} 個任務` : `GA 少 ${s.gapZ} 個任務`);
+      html += `<div>任務數差距 gapZ = Z* − Z_GA<b>${s.gapZ}</b><span class="muted small">${gapTxt}（負值 = GA 任務數較多）</span></div>`;
+      html += `</div><p class="muted small">參考：MILP ${ref.proven ? '已證明最佳' : '未證明最佳（incumbent）'} (Z*, W*) = (${ref.score.assigned}, ${ref.score.totalWait})，版本 r${state.revision}。${ref.proven ? '' : '未證明最佳時只報對 incumbent 的差距，不稱最佳命中率，差距不代表最優性。'}</p>`;
     } else html += `</div><p class="muted small">目前版本沒有可比較的 MILP 解（先在「模型」分頁求解），只列 GA 自身統計。</p>`;
+    const p = state.ga.params || {};
+    html += `<p class="muted small">本批有效參數（runId ${esc(state.ga.runId)}）：${esc(p.encoding)}${p.encoding === 'direct' ? '/' + esc(p.directMode) + '，λ=' + p.lambda : ''}，N=${p.popSize}，G=${p.generations}，S=${p.stagnation}，pc=${p.pc}，pm=${p.pm}，k=${p.tournamentK}，e=${p.elite}，seed=${p.seed}</p>`;
     html += `<table class="stats"><thead><tr><th>#</th><th>seed</th><th>Z</th><th>W</th><th>objective</th><th>達最佳世代</th><th>世代數</th><th>停止原因</th><th>ms</th></tr></thead><tbody>` +
       results.map((r, i) => `<tr><td>${i + 1}</td><td>${r.seed}</td><td>${r.best.score.assigned}</td><td>${r.best.score.totalWait}</td><td>${r.best.score.objective.toFixed(4)}</td><td>${r.best.gen}</td><td>${r.generations}</td><td>${esc(r.stopReason)}</td><td>${Math.round(r.elapsedMs)}</td></tr>`).join('') + '</tbody></table>';
     $('#gaResult').innerHTML = html;
@@ -499,20 +537,20 @@ self.onmessage = function (e) {
   // CSV（§5.3、C1）
   const csvEsc = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   function csvCurves() {
-    const rows = [['runIndex', 'seed', 'generation', 'best', 'avg', 'bestAssigned', 'bestWait']];
-    (state.ga.results || []).forEach((r, i) => r.history.forEach((p) => rows.push([i, r.seed, p.gen, p.best, p.avg, p.bestAssigned, p.bestWait])));
+    const rows = [['runId', 'runIndex', 'seed', 'generation', 'best', 'avg', 'bestAssigned', 'bestWait']];
+    (state.ga.results || []).forEach((r, i) => r.history.forEach((p) => rows.push([state.ga.runId, i, r.seed, p.gen, p.best, p.avg, p.bestAssigned, p.bestWait])));
     return rows.map((r) => r.map(csvEsc).join(',')).join('\n') + '\n';
   }
   function csvStats() {
     const s = state.ga.summary; const res = state.ga.results || [];
-    const rows = [['runIndex', 'seed', 'assigned', 'totalWait', 'objective', 'bestGen', 'generations', 'stopReason', 'elapsedMs', 'hitZ', 'hitZW', 'dataName', 'revision', 'encoding', 'directMode', 'popSize', 'generationsMax', 'stagnation', 'pc', 'pm', 'tournamentK', 'elite', 'lambda']];
+    const rows = [['runId', 'runIndex', 'seed', 'assigned', 'totalWait', 'objective', 'bestGen', 'generations', 'stopReason', 'elapsedMs', 'hitZ', 'hitZW', 'dataName', 'revision', 'encoding', 'directMode', 'popSize', 'generationsMax', 'stagnation', 'pc', 'pm', 'tournamentK', 'elite', 'lambda']];
     const p = state.ga.params || {};
-    res.forEach((r, i) => rows.push([i, r.seed, r.best.score.assigned, r.best.score.totalWait, r.best.score.objective, r.best.gen, r.generations, r.stopReason, Math.round(r.elapsedMs),
+    res.forEach((r, i) => rows.push([state.ga.runId, i, r.seed, r.best.score.assigned, r.best.score.totalWait, r.best.score.objective, r.best.gen, r.generations, r.stopReason, Math.round(r.elapsedMs),
       s && s.reference ? (r.best.score.assigned === s.reference.assigned ? 1 : 0) : '', s && s.reference ? (r.best.score.assigned === s.reference.assigned && r.best.score.totalWait === s.reference.totalWait ? 1 : 0) : '',
       state.ga.data && state.ga.data.meta.name, state.ga.revision, p.encoding, p.directMode, p.popSize, p.generations, p.stagnation, p.pc, p.pm, p.tournamentK, p.elite, r.params ? r.params.lambda : '']));
     if (s) {
-      rows.push([]); rows.push(['summary', 'runs', 'bestZ', 'bestW', 'meanZ', 'sdZ', 'meanW', 'sdW', 'meanGenerations', 'meanMs', 'hitZ', 'hitZW', 'hitZRate', 'hitZWRate', 'meanGenToHit', 'missZW', 'refZ', 'refW', 'refProven']);
-      rows.push(['summary', s.runs, s.bestZ, s.bestW, s.meanZ, s.sdZ == null ? 'N/A' : s.sdZ, s.meanW, s.sdW == null ? 'N/A' : s.sdW, s.meanGenerations, s.meanMs, s.hitZ == null ? '' : s.hitZ, s.hitZW == null ? '' : s.hitZW, s.hitZRate == null ? '' : s.hitZRate, s.hitZWRate == null ? '' : s.hitZWRate, s.meanGenToHit == null ? 'N/A' : s.meanGenToHit, s.missZW == null ? '' : s.missZW, s.reference ? s.reference.assigned : '', s.reference ? s.reference.totalWait : '', s.reference ? s.reference.proven : '']);
+      rows.push([]); rows.push(['summary', 'runId', 'runs', 'bestZ', 'bestW', 'meanZ', 'sdZ', 'meanW', 'sdW', 'meanGenerations', 'meanMs', 'hitZ', 'hitZW', 'hitZRate', 'hitZWRate', 'meanGenToHit', 'missZW', 'refZ', 'refW', 'refProven', 'gapZ']);
+      rows.push(['summary', state.ga.runId, s.runs, s.bestZ, s.bestW, s.meanZ, s.sdZ == null ? 'N/A' : s.sdZ, s.meanW, s.sdW == null ? 'N/A' : s.sdW, s.meanGenerations, s.meanMs, s.hitZ == null ? '' : s.hitZ, s.hitZW == null ? '' : s.hitZW, s.hitZRate == null ? '' : s.hitZRate, s.hitZWRate == null ? '' : s.hitZWRate, s.meanGenToHit == null ? 'N/A' : s.meanGenToHit, s.missZW == null ? '' : s.missZW, s.reference ? s.reference.assigned : '', s.reference ? s.reference.totalWait : '', s.reference ? s.reference.proven : '', s.gapZ == null ? '' : s.gapZ]);
     }
     return rows.map((r) => r.map(csvEsc).join(',')).join('\n') + '\n';
   }
@@ -659,7 +697,8 @@ self.onmessage = function (e) {
   SGS.app = {
     state, gate,
     showTab, loadData, importJSONText, applyDraft, solveMILP, cancelSolve, setSlot, makeSlot, renderSched, ganttLayout,
-    runGA, cancelGA, readGaParams, writeGaParams, csvCurves, csvStats, csvSchedule, gaReference,
+    runGA, cancelGA, readGaParams, writeGaParams, validateGaParams, csvCurves, csvStats, csvSchedule, gaReference,
+    _setWorkerFactory: (fn) => { workerFactory = fn; },
     getDraft: () => state.draft,
     _setGLPKFactory: (fn) => { destroyGLPK(); glpkFactory = fn; },
     _glpkDebug: () => ({ inst: glpkInst, pending: !!glpkPromise, gen: glpkGen }),

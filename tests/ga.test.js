@@ -62,7 +62,9 @@ test('direct/penalty: λ default n+1; infeasible raw fitness < 0 (≤ −(n+1)/(
   const genes = norm.requests.map(() => ({ assign: 0, ant: -1, start: 0 }));
   genes[0] = { assign: 1, ant: 0, start: 30 }; // one window violation
   const ev = G.decode(ctx, p, { genes });
-  assert.strictEqual(ev.feasible, false); assert.strictEqual(ev.violations, 1);
+  assert.strictEqual(ev.feasible, false); assert.strictEqual(ev.violationCount, 1);
+  assert.deepStrictEqual(ev.violations.map((v) => v.rule + ':' + v.reqs.join()), ['window:R1']);   // A1：保留集合
+  assert.ok(Math.abs(ev.rawFitness - (ev.score.objective - 7 * 1)) < 1e-12);
   assert.ok(ev.fitness < 0 && ev.fitness <= -7 / 241 + 1e-12, 'fitness=' + ev.fitness);
   const g2 = norm.requests.map(() => ({ assign: 0, ant: -1, start: 0 })); g2[0] = { assign: 1, ant: 0, start: 0 };
   const ev2 = G.decode(ctx, p, { genes: g2 });
@@ -100,11 +102,58 @@ test('stop reasons: stagnation vs generations; shouldStop → cancelled', () => 
   assert.strictEqual(G.run(norm, { seed: 1, generations: 3, stagnation: 500 }).stopReason, 'generations');
   let calls = 0;
   const r = G.run(norm, { seed: 1, generations: 100, stagnation: 100 }, { shouldStop: () => ++calls >= 2 });
-  assert.strictEqual(r.stopReason, 'cancelled'); assert.strictEqual(r.generations, 2);
+  assert.strictEqual(r.stopReason, 'cancelled'); assert.strictEqual(r.generations, 1); assert.strictEqual(r.history.length, 2);
 });
 test('run seeds: (base+i)>>>0 from i=0; default 42,20 → 42..61', () => {
   assert.deepStrictEqual(G.runSeeds(42, 20), Array.from({ length: 20 }, (_, i) => 42 + i));
   assert.deepStrictEqual(G.runSeeds(0xFFFFFFFF, 2), [0xFFFFFFFF, 0]);
+});
+
+section('B3 unified generation numbering');
+test('history gen 0 = initial population; best.gen equals first history gen reaching the best score', () => {
+  const norm = E.normalize(DEFAULT);
+  const r = G.run(norm, { encoding: 'direct', directMode: 'repair', seed: 1, generations: 100, stagnation: 50 });
+  assert.strictEqual(r.history[0].gen, 0);
+  assert.deepStrictEqual([r.best.score.assigned, r.best.score.totalWait], [5, 11]);
+  const first = r.history.find((h) => h.bestAssigned === 5 && h.bestWait === 11);
+  assert.strictEqual(first.gen, r.best.gen);
+  assert.strictEqual(r.history.length, r.generations + 1);
+  const s = G.summarize([r], { score: { assigned: 5, totalWait: 11 }, proven: true });
+  assert.strictEqual(s.meanGenToHit, r.best.gen);
+  const ind = G.run(norm, { seed: 42 });
+  assert.strictEqual(ind.best.gen, 0);
+  assert.strictEqual(ind.history[0].bestAssigned, 5);
+});
+test('bestGen (raw fitness) uses the same numbering as history', () => {
+  const norm = E.normalize(DEFAULT);
+  const r = G.run(norm, { encoding: 'direct', directMode: 'repair', seed: 1, generations: 100, stagnation: 50 });
+  const maxFit = Math.max(...r.history.map((h) => h.best));
+  assert.strictEqual(r.history.find((h) => Math.abs(h.best - maxFit) < 1e-12).gen, r.bestGen);
+});
+
+section('B2 generateInstance validation & bounds');
+test('H=10..15 with seeds 0,1,2,3,42: all windows within H, validateData ok', () => {
+  for (const H of [10, 11, 12, 13, 14, 15]) for (const seed of [0, 1, 2, 3, 42]) {
+    const d = E.generateInstance(seed, { H });
+    assert.ok(E.validateData(d).ok, `H=${H} seed=${seed}`);
+    d.visibility.forEach((v) => assert.ok(v.start >= 0 && v.start < v.end && v.end <= H));
+    d.requests.forEach((r) => assert.ok(r.start >= 0 && r.start < r.end && r.end <= H && r.durMin <= H));
+  }
+});
+test('antenna ids unique for any bands incl. S/S3 with 3 antennas per station', () => {
+  const d = E.generateInstance(1, { bands: ['S', 'S3'], nAntennaPerStation: 3, nStation: 2 });
+  const ids = d.stations.flatMap((s) => s.antennas.map((a) => a.id));
+  assert.strictEqual(new Set(ids).size, ids.length);
+  assert.ok(E.validateData(d).ok);
+});
+test('invalid generator inputs throw a located error (no partial data)', () => {
+  for (const [o, path] of [[{ nSat: 1.5 }, 'nSat'], [{ nStation: 1.5 }, 'nStation'], [{ nReq: 0 }, 'nReq'], [{ nReq: NaN }, 'nReq'], [{ windowDensity: 2 }, 'windowDensity'], [{ windowDensity: -0.1 }, 'windowDensity'], [{ H: 5 }, 'H'], [{ H: 10.5 }, 'H'], [{ calibDefaultMin: -1 }, 'calibDefaultMin'], [{ bands: ['S', 'S'] }, 'bands'], [{ bands: ['S', ''] }, 'bands']]) {
+    let threw = null; try { E.generateInstance(1, o); } catch (e) { threw = e; }
+    assert.ok(threw && threw.errors && threw.errors.some((e) => e.path === path), JSON.stringify(o));
+  }
+  let t = null; try { E.generateInstance(-1, {}); } catch (e) { t = e; }
+  assert.ok(t && t.errors.some((e) => e.path === 'seed'));
+  assert.deepStrictEqual(E.generateInstance(5, { nReq: 7 }), E.generateInstance(5, { nReq: 7 }));
 });
 
 section('§8 S2 acceptance (Node part)');
