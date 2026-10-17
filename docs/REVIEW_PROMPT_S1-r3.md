@@ -1,6 +1,6 @@
 # Codex 複審 Prompt — S1-r3
 
-複審 S1。被審 commit `__SHA__`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S1-codex-r3.md`，不改其他檔。
+複審 S1。被審 commit `f0b2dea`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S1-codex-r3.md`，不改其他檔。
 
 讀：`docs/reviews/S1-response.md` 第三段（r2 回應）→ `src/engine.js`（`fmt`、validateData、checkFeasible）→ `src/ui.js`（`esc`、importJSONText）→ `tests/engine.test.js` N1 段 → `tests/browser.s1.js` N1／A3 步驟。
 
