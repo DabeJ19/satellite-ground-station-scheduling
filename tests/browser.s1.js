@@ -15,7 +15,8 @@ async function step(name, fn) {
 }
 
 (async () => {
-  const browser = await chromium.launch();
+  // 無法下載 Chromium 的環境：PW_CHANNEL=msedge 或 chrome 可用本機已安裝的瀏覽器
+  const browser = await chromium.launch(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {});
   try {
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
     const errs = [], ext = [];
