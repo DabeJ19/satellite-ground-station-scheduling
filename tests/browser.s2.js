@@ -192,6 +192,21 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
       assert.deepStrictEqual([r2.inp, r2.lambda], ['', r2.n + 1]);
       await page.evaluate(async () => { await SGS.app.loadData(window.SGS_DEFAULT_DATA); SGS.app.writeGaParams({ encoding: 'indirect', directMode: 'repair', lambda: null, popSize: 50, generations: 200, stagnation: 50, seed: 42, runs: 20 }); await SGS.app.solveMILP(); });
     });
+    await step('A2: saved GA params (direct/penalty, λ=7, N=10, G=10) restored after reload; manual 7 kept on n=30 with warning', async () => {
+      await page.evaluate(() => { SGS.app.writeGaParams({ encoding: 'direct', directMode: 'penalty', lambda: 7, popSize: 10, generations: 10, stagnation: 10, seed: 42, runs: 1 }); document.querySelector('[data-ga="lambda"]').dispatchEvent(new Event('change')); });
+      await page.reload();
+      await page.waitForFunction(() => document.getElementById('glpkStatus').textContent.includes('就緒'), null, { timeout: 20000 });
+      const r = await page.evaluate(async () => {
+        const v = (k) => document.querySelector(`[data-ga="${k}"]`).value;
+        const ctl = { encoding: v('encoding'), directMode: v('directMode'), lambda: v('lambda'), popSize: v('popSize'), generations: v('generations') };
+        SGS.app.loadData(SGS.engine.generateInstance(1, { nReq: 30, nSat: 6, nStation: 3 }));
+        await SGS.app.runGA(1);
+        return { ctl, lambda: SGS.app.state.ga.params.lambda, mode: SGS.app.state.ga.params.lambdaMode, warn: /不再保證/.test(document.getElementById('gaStatus').innerText) };
+      });
+      assert.deepStrictEqual(r.ctl, { encoding: 'direct', directMode: 'penalty', lambda: '7', popSize: '10', generations: '10' });
+      assert.deepStrictEqual([r.lambda, r.mode, r.warn], [7, 'manual', true]);
+      await page.evaluate(async () => { await SGS.app.loadData(window.SGS_DEFAULT_DATA); SGS.app.writeGaParams({ encoding: 'indirect', directMode: 'repair', lambda: null, popSize: 50, generations: 200, stagnation: 50, seed: 42, runs: 20 }); document.querySelector('[data-ga="lambda"]').dispatchEvent(new Event('change')); await SGS.app.solveMILP(); });
+    });
     await step('N2: chart axis uses gen 0..maxGen; generations=1 → gen0 at plotLeft, gen1 at plotRight, ticks [0,1]', async () => {
       await page.evaluate(() => SGS.app.showTab('ga'));
       const r = await page.evaluate(async () => {

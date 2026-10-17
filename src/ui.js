@@ -695,6 +695,7 @@ self.onmessage = function (e) {
     if (!loaded) commit(clone(root.SGS_DEFAULT_DATA), { revision: 1 });
     state.draft = clone(state.data);
     $('#tmlim').value = state.settings.tmlim;
+    if (state.settings.ga && Object.keys(state.settings.ga).length) writeGaParams(state.settings.ga);   // A2：重開頁面回填已保存的 GA 參數（λ null → 空白）
     renderDataTab(); renderAll();
   }
 

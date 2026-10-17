@@ -32,3 +32,7 @@
 | N2 曲線座標 | **採納**：minGen=0、maxGen=各曲線最後 gen 的最大值，x(g)=L+(g−0)/max(1,maxGen)·plotW；刻度從 0 起並含 maxGen；`state.lastGaChart` 暴露刻度與各點 x 供測試。瀏覽器：generations=1 → gen0 在 plotLeft、gen1 在 plotRight、刻度 [0,1]；3 runs 不同停止世代 → 最長曲線末點對齊右端、所有點在繪圖區內、best.gen == 曲線首次命中世代 | ui.js；browser N2 |
 
 自測：`npm test` 39+19；瀏覽器 S1 19 步、S2 15 步；build 343 KB。
+
+---
+# Response to Review S2-r3 — Claude Code
+PR #8 已合併。A2（重開頁面回填 GA 參數）提前採納：boot 還原 settings 後 `writeGaParams(state.settings.ga)`；測試：direct/penalty、λ=7、N=10、G=10 reload 後四者恢復，n=30 仍用手動 7 並警示。
