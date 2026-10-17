@@ -1,0 +1,30 @@
+{
+  "meta": { "name": "PPT week6 Given Data", "timeOrigin": "10:00", "horizonMin": 40, "calibDefaultMin": 10 },
+  "bands": ["S", "X"],
+  "satellites": [
+    { "id": "SAT_A", "color": "#4f8ef7" },
+    { "id": "SAT_B", "color": "#f28b5b" },
+    { "id": "SAT_C", "color": "#b48ee0" }
+  ],
+  "stations": [
+    { "id": "GS_1", "angleDeg": 0,   "antennas": [ { "id": "GS_1-S", "band": "S", "calibMin": null } ] },
+    { "id": "GS_2", "angleDeg": 120, "antennas": [ { "id": "GS_2-S", "band": "S", "calibMin": null },
+                                                   { "id": "GS_2-X", "band": "X", "calibMin": null } ] }
+  ],
+  "visibility": [
+    { "sat": "SAT_A", "station": "GS_1", "start": 0,  "end": 12 },
+    { "sat": "SAT_A", "station": "GS_2", "start": 3,  "end": 15 },
+    { "sat": "SAT_B", "station": "GS_1", "start": 6,  "end": 18 },
+    { "sat": "SAT_B", "station": "GS_2", "start": 8,  "end": 20 },
+    { "sat": "SAT_C", "station": "GS_1", "start": 20, "end": 32 },
+    { "sat": "SAT_C", "station": "GS_2", "start": 22, "end": 34 }
+  ],
+  "requests": [
+    { "id": "R1", "sat": "SAT_A", "band": "S", "durMin": 5, "start": 0,  "end": 10 },
+    { "id": "R2", "sat": "SAT_A", "band": "X", "durMin": 2, "start": 2,  "end": 8 },
+    { "id": "R3", "sat": "SAT_B", "band": "S", "durMin": 5, "start": 6,  "end": 14 },
+    { "id": "R4", "sat": "SAT_B", "band": "X", "durMin": 2, "start": 8,  "end": 16 },
+    { "id": "R5", "sat": "SAT_C", "band": "S", "durMin": 5, "start": 20, "end": 30 },
+    { "id": "R6", "sat": "SAT_C", "band": "X", "durMin": 2, "start": 20, "end": 26 }
+  ]
+}

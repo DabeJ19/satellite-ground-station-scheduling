@@ -1,0 +1,10 @@
+{
+  "name": "satellite-ground-station-scheduling",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MILP optimal + GA scheduling of satellite ground-station contacts, single-file HTML tool",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "license": "MIT"
+}

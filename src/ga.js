@@ -1,0 +1,3 @@
+// ga.js — 見 SPEC.md。S0 僅骨架。
+window.SGS = window.SGS || {};
+SGS.ga = SGS.ga || {};

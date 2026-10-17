@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>衛星地面站排程 — MILP × GA</title>
+<!-- @inline:style.css -->
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">衛星地面站排程 <span class="muted">MILP 最佳解 × 基因演算法</span></div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="data" class="active">資料</button>
+    <button data-tab="model">模型</button>
+    <button data-tab="ga">GA 實驗</button>
+    <button data-tab="sched">排程與動畫</button>
+  </nav>
+  <div class="right">
+    <button id="themeToggle" title="切換主題">◐</button>
+  </div>
+</header>
+
+<main>
+  <section class="tab" id="tab-data"><h2>資料</h2><p class="muted">S1 實作。</p></section>
+  <section class="tab hidden" id="tab-model"><h2>模型</h2><p class="muted">S1 實作。</p>
+    <div id="s0-smoke" class="card"><b>S0 煙霧測試</b> <span id="glpkStatus">glpk 載入中…</span></div>
+  </section>
+  <section class="tab hidden" id="tab-ga"><h2>GA 實驗</h2><p class="muted">S2 實作。</p></section>
+  <section class="tab hidden" id="tab-sched"><h2>排程與動畫</h2><p class="muted">S1 甘特圖、S3 動畫。</p></section>
+</main>
+<footer class="muted small">build __BUILD_TIME__ · glpk.js 5.0.0 (GPL-3.0) 內嵌 · 離線可用</footer>
+
+<!-- @inline:glpk -->
+<!-- @inline:default.json -->
+<!-- @inline:engine.js -->
+<!-- @inline:milp.js -->
+<!-- @inline:ga.js -->
+<!-- @inline:anim.js -->
+<!-- @inline:ui.js -->
+</body>
+</html>
