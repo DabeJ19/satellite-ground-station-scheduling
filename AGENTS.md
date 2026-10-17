@@ -20,7 +20,7 @@
 ## 審查請求格式
 見 `docs/REVIEW_REQUEST_TEMPLATE.md`。工程方在 sprint 結束時產出兩個檔案：
 - `docs/REVIEW_REQUEST_<sprint>.md`：範圍、自測結果、重點
-- `docs/REVIEW_PROMPT_<sprint>.md`：**可直接貼給 Codex 的完整審查 prompt**（PO 的標準要求，每次審查必附），並同時在對話中貼出
+- `docs/REVIEW_PROMPT_<sprint>.md`：**可直接貼給 Codex 的審查 prompt**（PO 的標準要求，每次審查必附），並同時在對話中貼出。寫法：精簡，只給 commit、要讀的檔、要回答的問題與輸出格式；repo 裡已有的內容不重述
 
 ## 審查回覆格式
 ```
