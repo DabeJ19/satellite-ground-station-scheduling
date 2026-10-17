@@ -84,7 +84,8 @@
     return v;
   }
 
-  function setSlot(name, slot) { state.slots[name] = slot; saveLS(); renderSched(); }
+  // 所有解槽寫入（MILP／GA／手動）共用：若寫入的是目前選中槽，播放資料來源可能已換 → 先依新 viewNorm() 同步游標（N1）
+  function setSlot(name, slot) { state.slots[name] = slot; if (name === state.activeSlot) syncPlay(); saveLS(); renderSched(); }
 
   function makeSlot(norm, data, schedule, meta, revision) {
     const fe = E.checkFeasible(norm, schedule);
@@ -718,7 +719,7 @@ self.onmessage = function (e) {
   function ensureManual() {
     if (state.activeSlot === 'manual' && state.slots.manual && state.slots.manual.revision === state.revision) return state.slots.manual;
     const slot = makeSlot(state.norm, state.data, clone(manualBase()), { source: 'manual', label: { kind: 'feas', text: '手動' }, basedOn: state.activeSlot }, state.revision);
-    state.slots.manual = slot; state.activeSlot = 'manual';
+    state.slots.manual = slot; state.activeSlot = 'manual'; syncPlay();
     return slot;
   }
   function setManualTask(req, antenna, start) {
@@ -962,6 +963,7 @@ self.onmessage = function (e) {
           const s = saved.slots[k]; if (!s || !s.data || !Array.isArray(s.schedule) || !E.validateData(s.data).ok) return;
           try { const norm = E.normalize(s.data); state.slots[k] = makeSlot(norm, s.data, s.schedule, s.meta, s.revision); } catch (_) {}
         });
+        syncPlay();
         loaded = true;
       }
     }

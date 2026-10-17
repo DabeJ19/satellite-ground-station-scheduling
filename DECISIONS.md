@@ -147,3 +147,10 @@
 | A2 多衛星版面 | 軌道間距 < 8px 時縮小地球半徑（下限 12）與間距（下限 3），外圈留 24px | 提前於 S3-r2 落實 |
 | drawFrame 可觀測 | 回傳 `render:{arcs,litStations,litSats}` 供 Node 測試 | 不必 mock 完整 canvas |
 
+## 2026-10-17 S3 Codex 複審 r2 → r3
+| 項目 | 決定 | 原因 |
+|---|---|---|
+| N1 解槽寫入同步播放 | `setSlot()` 寫入目前選中槽時先 `syncPlay()`；`ensureManual()` 切到手動槽同步；boot 還原解槽後同步一次 | 求解完成替換選中槽也會更換播放資料來源 |
+| A1 band/color 重畫、無效 H 停用拖曳 | 留 S4 | Codex 建議項 |
+| A2 大量衛星的畫布容量 | 留 S4（可捲動／縮放） | Codex 建議項 |
+

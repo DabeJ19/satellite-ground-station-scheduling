@@ -15,3 +15,20 @@
 其他：`drawFrame` 回傳 `render:{arcs,litStations,litSats}`（純附加，測試用）；SPEC §6 補明定（draft 5）；DECISIONS 追加一節。
 
 測試：`npm test` 72（39+19+14）全綠；`npm run build` 374 KB；browser S1 19／S2 16／S3 12 步全綠（Chromium，file://，零外部請求）。
+
+---
+
+# S3 複審回應（r2 → r3）
+
+對應 `docs/reviews/S3-codex-r2.md`（PR #10）。
+
+| 項目 | 採納 | 修改 | 驗證 |
+|---|---|---|---|
+| N1 求解結果替換選中槽未同步播放游標 | 採納 | `src/ui.js` `setSlot(name, slot)`：寫入後若 `name === state.activeSlot` 先 `syncPlay()` 再 `saveLS/renderSched`；MILP、GA、手動皆走 `setSlot`；`ensureManual()` 切到手動槽後 `syncPlay()`；boot 還原解槽後同步一次。暫停狀態不變 | `tests/browser.s3.js` 新增 N1 步：GA 路徑 H80/t70 → 提交 H40（舊槽保留 t70）→ 重跑 GA → t=40、拉桿 100、標籤 10:40、動畫 t=40、playing=false；一般同步 t=20：25% → 換 H40 槽後 50%、timeOrigin 改 20:00 → 標籤 20:20；更新未選中 MILP 槽（零候選）不改 GA 槽的 t/H/標籤；MILP 路徑 t=100 → 提交 H40、`solveMILP()` 替換選中槽 → 40/100%/20:40 |
+| A1 band/color 重畫、無效 H 停用拖曳 | 延後 S4 | — | 依 Codex 建議列入 S4 |
+| A2 大量衛星畫布容量 | 延後 S4 | — | 依 Codex 建議列入 S4 |
+
+SPEC §6 播放資料來源一句補「任何解槽寫入落在選中槽時同步；寫入未選中槽不改動檢視時間」。
+
+測試：`npm test` 72 全綠；build 374 KB；browser S1 19／S2 16／S3 13 步全綠。
+

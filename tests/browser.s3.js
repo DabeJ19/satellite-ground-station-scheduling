@@ -212,6 +212,35 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
       assert.ok(r.t <= 40 && Math.abs(r.scrub - r.t / 40 * 100) < 0.1, JSON.stringify(r));
       assert.deepStrictEqual(errs, []);
     });
+    await step('N1: solve result replacing the selected slot re-syncs playback (GA path, MILP zero-candidate path, unselected slot untouched)', async () => {
+      // H=80 建 GA 槽、選中、t=70 → 提交 H=40 → 重新跑 GA 寫入目前版本的 H=40 槽 → t 夾到 40、拉桿 100、標籤 10:40、動畫 t=40
+      await page.evaluate(async () => { const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.meta.horizonMin = 80; d.meta.timeOrigin = '10:00'; SGS.app.loadData(d); SGS.app.writeGaParams({ runs: 1, seed: 7, popSize: 4, elite: 1, generations: 2, stagnation: 2 }); await SGS.app.runGA(1); SGS.app.showTab('sched'); SGS.app.state.activeSlot = 'ga'; SGS.app.renderSched(); SGS.app.setTime(70); });
+      let r = await page.evaluate(() => ({ H: SGS.app.viewNorm().H, t: SGS.app.state.play.t, scrub: Number(document.getElementById('playScrub').value) }));
+      assert.deepStrictEqual([r.H, r.t, r.scrub], [80, 70, 87.5], JSON.stringify(r));
+      await page.evaluate(() => { const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.meta.horizonMin = 40; SGS.app.loadData(d); });
+      r = await page.evaluate(() => ({ H: SGS.app.viewNorm().H, t: SGS.app.state.play.t, playing: SGS.app.state.play.playing }));
+      assert.deepStrictEqual([r.H, r.t, r.playing], [80, 70, false], 'old GA slot kept: ' + JSON.stringify(r));
+      await page.evaluate(async () => { await SGS.app.runGA(1); });
+      r = await page.evaluate(() => ({ gaRev: SGS.app.state.slots.ga.revision, rev: SGS.app.state.revision, H: SGS.app.viewNorm().H, t: SGS.app.state.play.t, scrub: Number(document.getElementById('playScrub').value), label: document.getElementById('playTime').textContent, anim: SGS.app.state.lastAnim.t, playing: SGS.app.state.play.playing }));
+      assert.strictEqual(r.gaRev, r.rev);
+      assert.deepStrictEqual([r.H, r.t, r.scrub, r.label, r.anim, r.playing], [40, 40, 100, '10:40', 40, false], JSON.stringify(r));
+      // 一般同步（非超界）：t=20 於 H=80 槽為 25% → 換成 H=40 槽後 t 仍 20、拉桿 50%；timeOrigin 改 20:00 → 標籤 20:20
+      await page.evaluate(async () => { const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.meta.horizonMin = 80; SGS.app.loadData(d); await SGS.app.runGA(1); SGS.app.setTime(20); });
+      r = await page.evaluate(() => Number(document.getElementById('playScrub').value)); assert.strictEqual(r, 25);
+      await page.evaluate(async () => { const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.meta.horizonMin = 40; d.meta.timeOrigin = '20:00'; SGS.app.loadData(d); await SGS.app.runGA(1); });
+      r = await page.evaluate(() => ({ t: SGS.app.state.play.t, scrub: Number(document.getElementById('playScrub').value), label: document.getElementById('playTime').textContent }));
+      assert.deepStrictEqual([r.t, r.scrub, r.label], [20, 50, '20:20'], JSON.stringify(r));
+      // 更新未選中的槽（MILP 零候選：requests=[] 的合法資料）不得改動選中 GA 槽的 t／H／標籤
+      await page.evaluate(async () => { const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.meta.horizonMin = 120; d.requests = []; SGS.app.loadData(d); await SGS.app.solveMILP(); });
+      r = await page.evaluate(() => ({ milpRev: SGS.app.state.slots.milp.revision, rev: SGS.app.state.revision, active: SGS.app.state.activeSlot, H: SGS.app.viewNorm().H, t: SGS.app.state.play.t, scrub: Number(document.getElementById('playScrub').value), label: document.getElementById('playTime').textContent }));
+      assert.strictEqual(r.milpRev, r.rev, 'MILP zero-candidate solved into current revision');
+      assert.deepStrictEqual([r.active, r.H, r.t, r.scrub, r.label], ['ga', 40, 20, 50, '20:20'], JSON.stringify(r));
+      // MILP 路徑：選中 MILP（H=40 舊槽... 此時 MILP 為 H=120 現版）→ setTime(100) → 提交 H=40、requests=[] → 再 solveMILP 替換選中槽 → t=40、100%
+      await page.evaluate(async () => { SGS.app.state.activeSlot = 'milp'; SGS.app.renderSched(); SGS.app.setTime(100); const d = JSON.parse(JSON.stringify(SGS.app.state.data)); d.meta.horizonMin = 40; SGS.app.loadData(d); await SGS.app.solveMILP(); });
+      r = await page.evaluate(() => ({ H: SGS.app.viewNorm().H, t: SGS.app.state.play.t, scrub: Number(document.getElementById('playScrub').value), label: document.getElementById('playTime').textContent, anim: SGS.app.state.lastAnim.t, playing: SGS.app.state.play.playing }));
+      assert.deepStrictEqual([r.H, r.t, r.scrub, r.label, r.anim, r.playing], [40, 40, 100, '20:40', 40, false], JSON.stringify(r));
+      assert.deepStrictEqual(errs, []);
+    });
     await step('A1: editing H or a row label in the data tab redraws the window editor immediately', async () => {
       await page.evaluate(() => { SGS.app.loadData(JSON.parse(JSON.stringify(SGS.app.state.data))); SGS.app.showTab('data'); });
       await page.click('#btnLoadDefault');
