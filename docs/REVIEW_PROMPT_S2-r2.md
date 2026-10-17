@@ -1,6 +1,6 @@
 # Codex 複審 Prompt — S2-r2
 
-複審 S2。被審 commit `__SHA__`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S2-codex-r2.md`，不改其他檔。
+複審 S2。被審 commit `5a1d427`（本 prompt 檔之後的提交不在審查範圍）。只新增 `docs/reviews/S2-codex-r2.md`，不改其他檔。
 
 讀：`docs/reviews/S2-response.md` → `src/ga.js`（run、decode）→ `src/engine.js`（generateInstance）→ `src/ui.js`（settleRun、runGA、validateGaParams、finishGA、csvCurves/csvStats）→ `tests/ga.test.js` B2/B3 段 → `tests/browser.s2.js` B1/B2/B4/B5/B6 步驟。
 
