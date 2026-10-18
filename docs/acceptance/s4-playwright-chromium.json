@@ -1,9 +1,9 @@
 {
-  "date": "2026-10-18T06:20:17.919Z",
+  "date": "2026-10-18T06:23:04.544Z",
   "url": "file:///home/claude/satellite-ground-station-scheduling/dist/index.html",
   "offline": true,
-  "sourceCommit": "4ea23c44c387ef5b144512c580680efcf016c2b8",
-  "distSha256": "0cc694ad5f71200a947ae3a46b4f4e2bec894c9d47aacb8d84ddea914e00ee63",
+  "sourceCommit": "fb036dfb53ff588624417f42efb0927d443ec121",
+  "distSha256": "c6f7bb2b2a270eccb9d80bce1cf623c6393ab60dd5035d546e5cfe93b61f1f83",
   "distBytes": 431286,
   "os": "linux 6.18.44-fc-v139 (x64)",
   "node": "v22.22.0",
@@ -60,7 +60,7 @@
           },
           {
             "name": "sgs-workspace.json",
-            "bytes": 11315
+            "bytes": 11314
           },
           {
             "name": "schedule-milp.csv",
@@ -68,7 +68,7 @@
           },
           {
             "name": "schedule-milp.json",
-            "bytes": 3560
+            "bytes": 3559
           },
           {
             "name": "gantt.png",
@@ -84,7 +84,7 @@
           },
           {
             "name": "ga-stats.csv",
-            "bytes": 668
+            "bytes": 669
           },
           {
             "name": "ga-schedule.csv",
