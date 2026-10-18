@@ -9,7 +9,11 @@ const { chromium } = require('playwright');
 const OUT = path.join(__dirname, 'out'); fs.mkdirSync(OUT, { recursive: true });
 const URL = 'file://' + path.resolve(__dirname, '..', 'dist', 'index.html');
 let passed = 0;
-const rec = { date: new Date().toISOString(), url: URL, offline: true, steps: [] };
+const os = require('os'); const crypto = require('crypto'); const { execSync } = require('child_process');
+const distBuf = fs.readFileSync(path.resolve(__dirname, '..', 'dist', 'index.html'));
+let gitRev = 'unknown'; try { gitRev = execSync('git rev-parse HEAD', { cwd: path.resolve(__dirname, '..'), encoding: 'utf8' }).trim(); } catch (_) {}
+const rec = { date: new Date().toISOString(), url: URL, offline: true, sourceCommit: gitRev, distSha256: crypto.createHash('sha256').update(distBuf).digest('hex'), distBytes: distBuf.length,
+  os: `${os.platform()} ${os.release()} (${os.arch()})`, node: process.version, channel: process.env.PW_CHANNEL || 'playwright-chromium', steps: [] };
 async function step(name, fn) { try { const info = await fn(); passed++; rec.steps.push({ name, ok: true, info: info || null }); console.log('  ✔', name); } catch (e) { rec.steps.push({ name, ok: false, error: e.message }); console.log('  ✘', name, '\n    ', e.message); throw e; } }
 const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, rej) => { const t0 = Date.now(); const t = setInterval(() => { let ok = false; try { ok = f(); } catch (e) { clearInterval(t); rej(e); return; } if (ok) { clearInterval(t); res(); } else if (Date.now() - t0 > (timeoutMs || 2000)) { clearInterval(t); rej(new Error('waitFor timeout: ' + (label || ''))); } }, 2); });`;
 
@@ -119,6 +123,120 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
       assert.ok(r.ok); assert.ok(r.same, 'workspace restored'); assert.strictEqual(r.mid, 5); assert.ok(r.plainOk); assert.strictEqual(r.badOk, false); assert.ok(r.unchanged && r.errShown);
       return r;
     });
+    await step('B1: bad slots are skipped (null item, non-object, unknown req/antenna, non-integer start); other valid slot kept; structurally valid but conflicting manual slot kept as infeasible; no pageerror', async () => {
+      const r = await page.evaluate(() => {
+        const D = () => JSON.parse(JSON.stringify(window.SGS_DEFAULT_DATA));
+        const good = { data: D(), revision: 99, schedule: [{ req: 'R1', antenna: 'GS_1-S', start: 0 }] };
+        const out = {};
+        const cases = { nullItem: [null], number: [7], unknownReq: [{ req: 'NOPE', antenna: 'GS_1-S', start: 0 }], unknownAnt: [{ req: 'R1', antenna: 'NOPE', start: 0 }], badStart: [{ req: 'R1', antenna: 'GS_1-S', start: 1.5 }], dup: [{ req: 'R1', antenna: 'GS_1-S', start: 0 }, { req: 'R1', antenna: 'GS_1-S', start: 20 }] };
+        for (const [name, sched] of Object.entries(cases)) {
+          const w = { format: 'sgs-workspace', version: 1, data: D(), revision: 99, slots: { milp: { data: D(), revision: 99, schedule: sched }, ga: good }, activeSlot: 'milp' };
+          const res = SGS.app.importJSONText(JSON.stringify(w));
+          SGS.app.showTab('sched'); SGS.app.renderSched();   // 繪圖不得拋錯
+          out[name] = { ok: res.ok, skipped: res.skipped, milp: SGS.app.state.slots.milp, gaKept: !!SGS.app.state.slots.ga && SGS.app.state.slots.ga.schedule.length === 1, rev: SGS.app.state.revision, errShown: !document.getElementById('dataErrors').classList.contains('hidden'), errText: document.getElementById('dataErrors').textContent };
+        }
+        // 結構合法但衝突的手動槽：保留為不可行
+        const w2 = { format: 'sgs-workspace', version: 1, data: D(), revision: 5, slots: { manual: { data: D(), revision: 5, schedule: [{ req: 'R1', antenna: 'GS_1-S', start: 0 }, { req: 'R3', antenna: 'GS_1-S', start: 2 }] } }, activeSlot: 'manual' };
+        const res2 = SGS.app.importJSONText(JSON.stringify(w2)); SGS.app.renderSched();
+        out.conflict = { ok: res2.ok, skipped: res2.skipped, feasible: SGS.app.state.slots.manual && SGS.app.state.slots.manual.feasible, rules: SGS.app.state.slots.manual && SGS.app.state.slots.manual.violations.map((v) => v.rule), violVisible: !document.getElementById('ganttViol').classList.contains('hidden') };
+        // 原型鏈鍵不被接受
+        const w3 = { format: 'sgs-workspace', version: 1, data: D(), revision: 6, slots: Object.create({ milp: good }), activeSlot: 'milp' };
+        const res3 = SGS.app.importJSONText(JSON.stringify(w3));   // JSON 不帶原型；直接走 restoreWorkspace 測原型鏈
+        const res3b = SGS.app.restoreWorkspace(w3);
+        out.proto = { jsonOk: res3.ok, directOk: res3b.ok, milp: SGS.app.state.slots.milp };
+        return out;
+      });
+      for (const k of ['nullItem', 'number', 'unknownReq', 'unknownAnt', 'badStart', 'dup']) {
+        const c = r[k];
+        assert.ok(c.ok, k); assert.strictEqual(c.milp, null, k + ' milp skipped'); assert.ok(c.skipped.some((x) => x.startsWith('milp')), k + ' ' + JSON.stringify(c.skipped));
+        assert.ok(c.gaKept, k + ' ga kept'); assert.strictEqual(c.rev, 99); assert.ok(c.errShown && /略過/.test(c.errText), k + ' hint');
+      }
+      assert.ok(r.conflict.ok && r.conflict.skipped.length === 0 && r.conflict.feasible === false && r.conflict.rules.includes(1) && r.conflict.violVisible, JSON.stringify(r.conflict));
+      assert.ok(r.proto.jsonOk && r.proto.directOk && r.proto.milp === null, JSON.stringify(r.proto));
+      assert.deepStrictEqual(errs, []);
+      return r;
+    });
+    await step('B2: invalid settings / format / version / requests-present are rejected BEFORE any state change (data, draft, revision, settings, slots, playback, worker untouched)', async () => {
+      await page.evaluate(async () => { SGS.app.loadData(window.SGS_DEFAULT_DATA); await SGS.app.solveMILP(); SGS.app.writeGaParams({ popSize: 77, seed: 5 }); document.querySelector('[data-ga="popSize"]').dispatchEvent(new Event('change')); SGS.app.showTab('sched'); SGS.app.state.activeSlot = 'milp'; SGS.app.renderSched(); SGS.app.setTime(7); });
+      const r = await page.evaluate(() => {
+        const D = () => { const d = JSON.parse(JSON.stringify(window.SGS_DEFAULT_DATA)); d.meta.name = 'should not commit'; return d; };
+        const snap = () => JSON.stringify({ rev: SGS.app.state.revision, name: SGS.app.state.data.meta.name, draft: SGS.app.getDraft().meta.name, settings: SGS.app.state.settings, slots: Object.fromEntries(Object.entries(SGS.app.state.slots).map(([k, v]) => [k, v && [v.revision, v.schedule]])), active: SGS.app.state.activeSlot, t: SGS.app.state.play.t, ui: SGS.app.readGaParams(), tmlim: document.getElementById('tmlim').value });
+        const before = snap();
+        const bad = {
+          gaString: { format: 'sgs-workspace', version: 1, data: D(), revision: 99, slots: {}, settings: { ga: 'oops' } },
+          seedObj: { format: 'sgs-workspace', version: 1, data: D(), revision: 99, slots: {}, settings: { ga: { seed: { toString: null } } } },
+          settingsArr: { format: 'sgs-workspace', version: 1, data: D(), revision: 99, slots: {}, settings: [] },
+          gaBadValue: { format: 'sgs-workspace', version: 1, data: D(), revision: 99, slots: {}, settings: { ga: { popSize: 1 } } },
+          tmlimBad: { format: 'sgs-workspace', version: 1, data: D(), revision: 99, slots: {}, settings: { tmlim: -3 } },
+          formatOther: Object.assign(D(), { format: 'other' }),
+          formatNull: Object.assign(D(), { format: null }),
+          version999: { format: 'sgs-workspace', version: 999, data: D(), revision: 99, slots: {} },
+          requestsNull: { data: D(), slots: {}, requests: null },
+          slotsArr: { format: 'sgs-workspace', version: 1, data: D(), revision: 99, slots: [] },
+          revBad: { format: 'sgs-workspace', version: 1, data: D(), revision: 0, slots: {} },
+        };
+        const out = {};
+        for (const [k, w] of Object.entries(bad)) {
+          let res, threw = null;
+          try { res = SGS.app.importJSONText(JSON.stringify(w)); } catch (e) { threw = e.message; }
+          out[k] = { ok: res && res.ok, threw, same: snap() === before, errShown: !document.getElementById('dataErrors').classList.contains('hidden') };
+        }
+        // 正常：目前版標記工作區與無標記舊格式都能還原
+        const ws = SGS.app.exportWorkspace(); const legacy = JSON.parse(JSON.stringify(ws)); delete legacy.format; delete legacy.version; delete legacy.exportedAt;
+        out.tagged = SGS.app.importJSONText(JSON.stringify(ws)).ok; out.legacy = SGS.app.importJSONText(JSON.stringify(legacy)).ok;
+        out.afterOk = snap() === before;
+        return out;
+      });
+      for (const k of Object.keys(r)) { if (['tagged', 'legacy', 'afterOk'].includes(k)) continue; const c = r[k]; assert.strictEqual(c.threw, null, k + ' threw'); assert.strictEqual(c.ok, false, k + ' must be rejected'); assert.ok(c.same, k + ' state changed'); assert.ok(c.errShown, k + ' error shown'); }
+      assert.ok(r.tagged && r.legacy && r.afterOk, JSON.stringify(r));
+      assert.deepStrictEqual(errs, []);
+      return r;
+    });
+    await step('B3: importing a workspace with ga={} restores GA controls to defaults (50/42, λ blank) and the next run uses them; partial settings are completed from fixed defaults, not the previous workspace', async () => {
+      const r = await page.evaluate(async () => {
+        const W = SGS.app.exportWorkspace(); W.settings = { tmlim: 30, ga: {} };
+        SGS.app.writeGaParams({ popSize: 99, seed: 123, lambda: 7 }); document.querySelector('[data-ga="popSize"]').dispatchEvent(new Event('change'));
+        const beforeUi = SGS.app.readGaParams();
+        const res = SGS.app.importJSONText(JSON.stringify(W));
+        const ui = SGS.app.readGaParams(); const settingsAfter = JSON.parse(JSON.stringify(SGS.app.state.settings.ga));
+        SGS.app.writeGaParams({ generations: 3, stagnation: 3, runs: 1 }); document.querySelector('[data-ga="runs"]').dispatchEvent(new Event('change'));
+        await SGS.app.runGA(1);
+        const used = SGS.app.state.ga.params;
+        // 部分設定：只給 popSize=10 → 其餘為固定預設（不是剛才的 99/123）
+        SGS.app.writeGaParams({ popSize: 99, seed: 123 }); document.querySelector('[data-ga="popSize"]').dispatchEvent(new Event('change'));
+        const W2 = SGS.app.exportWorkspace(); W2.settings = { ga: { popSize: 10 } };
+        const res2 = SGS.app.importJSONText(JSON.stringify(W2));
+        const ui2 = SGS.app.readGaParams();
+        return { beforeUi: [beforeUi.popSize, beforeUi.seed, beforeUi.lambda], ok: res.ok, ui: [ui.popSize, ui.seed, ui.lambda, ui.encoding, ui.runs], settings: settingsAfter, used: [used.popSize, used.seed, used.lambdaMode], ok2: res2.ok, ui2: [ui2.popSize, ui2.seed, ui2.lambda], settings2: [SGS.app.state.settings.ga.popSize, SGS.app.state.settings.ga.seed, SGS.app.state.settings.tmlim] };
+      });
+      assert.deepStrictEqual(r.beforeUi, [99, 123, 7]); assert.ok(r.ok);
+      assert.deepStrictEqual(r.ui, [50, 42, null, 'indirect', 20], JSON.stringify(r.ui));
+      assert.deepStrictEqual([r.settings.popSize, r.settings.seed, r.settings.lambda], [50, 42, null]);
+      assert.deepStrictEqual(r.used, [50, 42, 'auto']);
+      assert.ok(r.ok2); assert.deepStrictEqual(r.ui2, [10, 42, null]); assert.deepStrictEqual(r.settings2, [10, 42, 30]);
+      return r;
+    });
+    await step('B1/B2/B3 boot path: bad slot / bad settings / ga={} in localStorage → boot completes (defaults or partial restore), no pageerror', async () => {
+      const D = await page.evaluate(() => window.SGS_DEFAULT_DATA);
+      const good = { data: D, revision: 7, schedule: [{ req: 'R1', antenna: 'GS_1-S', start: 0 }] };
+      const bootWith = async (ws) => {
+        await page.evaluate((w) => { localStorage.setItem('sgs.state.v1', JSON.stringify(w)); }, ws);
+        const localErrs = []; const h = (e) => localErrs.push(e.message); page.on('pageerror', h);
+        await page.reload(); await page.waitForFunction(() => window.SGS && SGS.app && SGS.app.state.norm);
+        page.off('pageerror', h);
+        const r = await page.evaluate(() => ({ rev: SGS.app.state.revision, name: SGS.app.state.data.meta.name, milp: SGS.app.state.slots.milp && SGS.app.state.slots.milp.schedule.length, ga: SGS.app.state.slots.ga && SGS.app.state.slots.ga.schedule.length, ui: SGS.app.readGaParams(), err: document.getElementById('dataErrors').textContent, errShown: !document.getElementById('dataErrors').classList.contains('hidden') }));
+        return Object.assign(r, { pageErrors: localErrs });
+      };
+      const a = await bootWith({ format: 'sgs-workspace', version: 1, data: D, revision: 7, slots: { milp: { data: D, revision: 7, schedule: [null] }, ga: good }, activeSlot: 'milp' });
+      assert.deepStrictEqual([a.rev, a.milp, a.ga, a.pageErrors], [7, null, 1, []], JSON.stringify(a)); assert.ok(a.errShown && /略過/.test(a.err));
+      const b = await bootWith({ format: 'sgs-workspace', version: 1, data: Object.assign(JSON.parse(JSON.stringify(D)), { meta: Object.assign({}, D.meta, { name: 'bad settings' }) }), revision: 7, slots: {}, settings: { ga: 'oops' } });
+      assert.deepStrictEqual([b.rev, b.pageErrors], [1, []], JSON.stringify(b)); assert.notStrictEqual(b.name, 'bad settings'); assert.ok(b.errShown && /無法還原/.test(b.err));
+      assert.deepStrictEqual([b.ui.popSize, b.ui.seed, b.ui.lambda], [50, 42, null]);
+      const c = await bootWith({ format: 'sgs-workspace', version: 1, data: D, revision: 3, slots: {}, settings: { tmlim: 30, ga: {} } });
+      assert.deepStrictEqual([c.rev, c.ui.popSize, c.ui.seed, c.ui.lambda, c.ui.runs, c.pageErrors], [3, 50, 42, null, 20, []], JSON.stringify(c));
+      await page.evaluate(() => { try { localStorage.clear(); } catch (_) {} }); await page.reload(); await page.waitForFunction(() => document.getElementById('glpkStatus').textContent.includes('就緒'), null, { timeout: 20000 });
+      return { a, b, c };
+    });
     await step('theme toggle: switches data-theme and persists across reload (storage available)', async () => {
       const r = await page.evaluate(() => { const el = document.documentElement; const t0 = el.dataset.theme || 'dark'; document.getElementById('themeToggle').click(); return { t0, t1: el.dataset.theme }; });
       assert.notStrictEqual(r.t0, r.t1);
@@ -128,7 +246,7 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
       await page.evaluate(() => { document.getElementById('themeToggle').click(); });
       return r;
     });
-    await step('A1: band/color edits redraw the window editor; invalid H shows hint, disables dragging, and restores after fix', async () => {
+    await step('A1/B4: band/color edits redraw the window editor; invalid H shows hint, disables dragging (also mid-drag), and restores after fix', async () => {
       await page.evaluate(() => { SGS.app.loadData(window.SGS_DEFAULT_DATA); SGS.app.showTab('data'); });
       const r = await page.evaluate(() => {
         const orig = SGS.app._drawWinEditor; let n = 0; SGS.app._drawWinEditor = () => { n++; orig(); };
@@ -157,6 +275,26 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
       await page.mouse.move(pts2.from.x, pts2.from.y); await page.mouse.down(); await page.mouse.move(pts2.to.x, pts2.to.y, { steps: 5 }); await page.mouse.up();
       const end2 = await page.evaluate(() => SGS.app.getDraft().visibility[0].end);
       assert.strictEqual(end2, 16);
+      // B4：拖曳途中 H 變無效（''、0、1.5）→ 後續 move/up 不改 draft；恢復 H 後直接 move 仍不改；重新 pointerdown 才可改
+      for (const badH of ['', '0', '1.5']) {
+        await page.evaluate(() => { const el = document.querySelector('input[data-meta="horizonMin"]'); el.value = '80'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+        const p0 = await page.evaluate(() => { const W = SGS.app.state.lastWinEditor; const r = document.getElementById('winEditor').getBoundingClientRect(); const x = (t) => W.left + (t / W.H) * W.plotW; const row = W.rows[0]; return { from: { x: r.left + x(row.end), y: r.top + W.top + W.rowH / 2 }, to: { x: r.left + x(row.end + 4), y: r.top + W.top + W.rowH / 2 }, end: row.end }; });
+        await page.mouse.move(p0.from.x, p0.from.y); await page.mouse.down(); await page.mouse.move(p0.from.x + 2, p0.from.y);
+        await page.evaluate((h) => { const el = document.querySelector('input[data-meta="horizonMin"]'); el.value = h; el.dispatchEvent(new Event('input', { bubbles: true })); }, badH);
+        await page.mouse.move(p0.to.x, p0.to.y, { steps: 4 }); await page.mouse.up();
+        let e = await page.evaluate(() => SGS.app.getDraft().visibility[0].end);
+        assert.strictEqual(e, p0.end, `mid-drag H=${JSON.stringify(badH)} must not write`);
+        // 恢復 H，直接 move（沒有新的 pointerdown）仍不改
+        await page.evaluate(() => { const el = document.querySelector('input[data-meta="horizonMin"]'); el.value = '80'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+        await page.mouse.move(p0.to.x + 10, p0.to.y, { steps: 3 });
+        e = await page.evaluate(() => SGS.app.getDraft().visibility[0].end);
+        assert.strictEqual(e, p0.end, 'stale drag must not resume after H fixed');
+      }
+      // 重新 pointerdown → 可改
+      const p1 = await page.evaluate(() => { const W = SGS.app.state.lastWinEditor; const r = document.getElementById('winEditor').getBoundingClientRect(); const x = (t) => W.left + (t / W.H) * W.plotW; const row = W.rows[0]; return { from: { x: r.left + x(row.end), y: r.top + W.top + W.rowH / 2 }, to: { x: r.left + x(row.end + 2), y: r.top + W.top + W.rowH / 2 }, end: row.end }; });
+      await page.mouse.move(p1.from.x, p1.from.y); await page.mouse.down(); await page.mouse.move(p1.to.x, p1.to.y, { steps: 4 }); await page.mouse.up();
+      const e3 = await page.evaluate(() => SGS.app.getDraft().visibility[0].end);
+      assert.strictEqual(e3, p1.end + 2);
       await page.click('#btnRevert');
       return r;
     });
@@ -224,6 +362,8 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
 
     rec.passed = passed; rec.errors = errs.concat(errs2); rec.external = ext.concat(ext2);
     fs.writeFileSync(path.join(OUT, 'acceptance-s4.json'), JSON.stringify(rec, null, 2));
+    const keep = path.join(__dirname, '..', 'docs', 'acceptance'); fs.mkdirSync(keep, { recursive: true });
+    fs.writeFileSync(path.join(keep, `s4-${rec.channel}.json`), JSON.stringify(rec, null, 2));   // 每個瀏覽器渠道各一份，不互相覆寫
     console.log(`\n${passed} browser steps passed · ${rec.browser.name} ${rec.browser.version}`);
   } catch (e) { process.exitCode = 1; rec.failed = e && e.message; fs.writeFileSync(path.join(OUT, 'acceptance-s4.json'), JSON.stringify(rec, null, 2)); console.log('\nFAILED:', e && e.message); }
   finally { await browser.close(); }

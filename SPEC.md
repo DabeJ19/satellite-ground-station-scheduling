@@ -1,9 +1,10 @@
 # SPEC — 太空衛星地面站排程：最佳解（MILP）與基因演算法（GA）互動工具
 
-版本：S4 draft 6（2026-10-18）　狀態：S0 規格通過；依 Codex S1 審查（docs/reviews/S1-codex.md）補 §4.2 結果有效性與預算規則
+版本：S4 draft 7（2026-10-18）　狀態：S0 規格通過；依 Codex S1 審查（docs/reviews/S1-codex.md）補 §4.2 結果有效性與預算規則
 PO：James　工程：Claude Code　審查：Codex
 
 變更摘要（draft 1 → 2）：修正 §1.3 上界證明（B1）；明定等待基準與目標計算（B2）；新增資料驗證契約與候選集合定義（B3）；重寫超時 LP 上界／gap 規則（B4）；納入 S1–S7 建議；§9 開放問題全部結案。
+變更摘要（draft 6 → 7，S4-r2）：§6 工作區判別（自有欄位、format/version 驗證）、先驗後套用的還原順序、設定白名單與固定預設回填、壞解槽逐槽略過規則、時窗編輯器拖曳中 H 無效作廢。
 變更摘要（draft 5 → 6，S4）：§6 明定資料／工作區兩種 JSON 與判別規則、排程 CSV/JSON 取選中槽與 JSON 結構、多衛星可捲動畫布、時窗編輯器無效 H 處理；§7 單檔內授權區（GPL 全文、SHA、轉換說明）。
 變更摘要（draft 4 → 5，S3-r2）：§6 明定相位擬合程序（多盆地細化、等價容差、取最小角）、弧長未取模、複合鍵 JSON、播放資料來源與拖曳版本守門。
 變更摘要（draft 2 → 3）：罰則模式負等待與可行優先證明修正（N1）；MILP/GA 共用 revision/runId 寫入閘門（N2）；S1 驗收補邊界 fixture D、MILP 轉換 oracle 與 UI 驗收（N3）；三種 CSV 匯出（C1）；統計邊界 N/A 規則（C2）。
@@ -101,7 +102,11 @@ GLPK 為浮點運算，回傳後一律重新以整數計算 `assigned`、`totalW
 - 解（Schedule）：`[{ "req": "R1", "antenna": "GS_1-S", "start": 5 }]`；未出現的需求 = 未排入。任務 end 一律由 `start + durMin` 衍生，不信任匯入的 duration/end。
 - 三個解槽各存一份 Schedule + 來源標記 + 評分結果 + 資料 revision。
 - 持久化：整份 state（資料 + 參數 + 三解槽）存 localStorage；JSON 匯入／匯出同一結構。所有 localStorage 存取包 try/catch，失敗時降級為記憶體狀態並提示匯出 JSON 備份；儲存失敗不得阻止排程操作。
-  - （S4 明定）兩種 JSON：**資料 JSON**（`validateData` 的結構）與**工作區 JSON**（`{format:"sgs-workspace", version, data, revision, settings, slots, activeSlot}`，與 localStorage 同一結構）。匯入自動判別：有 `format` 或（有 `data`+`slots` 且無 `requests`）視為工作區；工作區 `data` 無效 → 拒絕且不動現有狀態；壞解槽逐一略過並提示。頁面啟動還原與匯入共用同一程序。
+  - （S4 明定）兩種 JSON：**資料 JSON**（`validateData` 的結構）與**工作區 JSON**（`{format:"sgs-workspace", version, data, revision, settings, slots, activeSlot}`，與 localStorage 同一結構）。頁面啟動還原與匯入共用同一程序 `restoreWorkspace`。
+  - （S4-r2 明定）判別：有**自有欄位** `format` → 帶標記工作區，`format` 必須為 `sgs-workspace` 且 `version` 為 1..支援版本的整數，否則拒絕；無標記相容路徑：有自有 `data`、`slots` 且**沒有自有** `requests` 欄位（以 hasOwnProperty 判斷，不以 truthiness）。其他一律走資料 JSON 驗證。
+  - （S4-r2 明定）還原順序：data、revision、slots 外層、settings 全部先在區域變數驗證；settings 從**固定預設**出發，只取白名單鍵（`tmlim` 正整數；`ga` 非陣列物件、各欄位型別正確、合成後通過 `validateGaParams`）；任何錯誤 → 回傳路徑錯誤，不 commit、不動資料／draft／revision／設定／解槽／播放／持久化／進行中 worker。通過後才一次套用，並完整回填全部 GA 控制項（`ga={}` = 預設值，λ null → 空白）。
+  - （S4-r2 明定）解槽：只接受 `manual/milp/ga` 三個自有鍵；逐槽先驗 data、`schedule` 為陣列、元素為物件且 req/antenna 存在、start 為整數、無 schema／duplicate-request 違規，否則**略過並提示**（其餘資料與有效槽仍還原）；結構合法但有資源／時窗衝突的排程保留為不可行槽。繪圖／匯出／接觸狀態對 null 或非物件元素一律跳過。boot 遇到無法還原的工作區 → 載入預設資料並提示，不得中斷啟動。
+  - （S4-r2 明定）時窗編輯器：重畫時發現 H 無效立即清除既有拖曳；pointermove 寫入前再檢查 `validH`，不合法即取消且不改 draft；H 修正後需重新 pointerdown。
 
 ### 2.1 資料驗證契約 `validateData()`
 在求解／匯入／資料編輯提交前執行；不合法時回報錯誤位置並停止求解，不靜默截斷或修正。

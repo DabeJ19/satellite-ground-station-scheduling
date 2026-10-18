@@ -13,7 +13,7 @@
     data: null, norm: null, revision: 0, // 已提交（通過驗證）的版本
     slots: { manual: null, milp: null, ga: null }, // {schedule, score, feasible, violations, revision, norm, data, meta}
     activeSlot: 'milp',
-    settings: { tmlim: 30, ga: {} },
+    settings: { tmlim: 30, ga: {} },   // boot 以 defaultSettings() 覆蓋
     solving: false,
     storageWarned: false,
     ga: { running: false, worker: null, results: [], curves: [], summary: null, mode: null, norm: null, revision: null },
@@ -153,43 +153,108 @@
     return loadData(obj);
   }
   // ---------- 工作區 JSON（§6：與 localStorage 同一結構） ----------
-  const WS_TAG = 'sgs-workspace';
+  const WS_TAG = 'sgs-workspace', WS_VERSION = 1;
+  const SLOT_KEYS = ['manual', 'milp', 'ga'];
+  const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const isPlainObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
+  const GA_KEYS = ['encoding', 'directMode', 'lambda', 'popSize', 'generations', 'stagnation', 'pc', 'pm', 'tournamentK', 'elite', 'seed', 'runs'];
+  // 固定預設設定（B3：每次還原都從這裡出發，不與前一工作區混合）
+  function defaultSettings() { return { tmlim: 30, ga: Object.assign({}, SGS.ga.DEFAULTS, { runs: 20 }) }; }
+  function fullGaParams(ga) { return Object.assign({}, SGS.ga.DEFAULTS, { runs: 20 }, ga || {}); }
   function snapshotWorkspace() {
     const slots = {};
-    Object.keys(state.slots).forEach((k) => { const s = state.slots[k]; slots[k] = s ? { schedule: s.schedule, revision: s.revision, meta: s.meta, data: s.data } : null; });
+    SLOT_KEYS.forEach((k) => { const s = state.slots[k]; slots[k] = s ? { schedule: s.schedule, revision: s.revision, meta: s.meta, data: s.data } : null; });
     return { data: state.data, revision: state.revision, settings: state.settings, slots, activeSlot: state.activeSlot };
   }
-  function exportWorkspace() { return Object.assign({ format: WS_TAG, version: 1, exportedAt: new Date().toISOString() }, snapshotWorkspace()); }
-  function isWorkspace(obj) { return !!(obj && typeof obj === 'object' && !Array.isArray(obj) && (obj.format === WS_TAG || (obj.data && typeof obj.data === 'object' && obj.slots && typeof obj.slots === 'object' && !obj.requests))); }
-  // 還原（boot 與匯入共用）：資料無效 → 回傳錯誤、不動現有狀態；解槽逐一驗證，壞的略過
-  function restoreWorkspace(saved) {
-    if (!saved || !saved.data) return { ok: false, errors: [{ path: 'workspace.data', msg: '工作區缺少 data' }] };
-    const v = E.validateData(saved.data);
-    if (!v.ok) return { ok: false, errors: v.errors.map((e) => ({ path: 'workspace.data.' + e.path, msg: e.msg })) };
-    const rev = Number.isInteger(saved.revision) && saved.revision > 0 ? saved.revision : 1;
-    const r = commit(saved.data, { revision: rev });
-    if (!r.ok) return r;
-    if (saved.settings && typeof saved.settings === 'object') {
-      state.settings = Object.assign(state.settings, saved.settings);
-      if (Number.isInteger(state.settings.tmlim) && $('#tmlim')) $('#tmlim').value = state.settings.tmlim;
-      if (state.settings.ga && Object.keys(state.settings.ga).length) writeGaParams(state.settings.ga);
+  function exportWorkspace() { return Object.assign({ format: WS_TAG, version: WS_VERSION, exportedAt: new Date().toISOString() }, snapshotWorkspace()); }
+  // 判別（B2）：有自有欄位 format → 帶標記工作區（format/version 另驗）；無標記相容：自有 data、slots 且沒有自有 requests
+  function isWorkspace(obj) {
+    if (!isPlainObj(obj)) return false;
+    if (hasOwn(obj, 'format')) return true;
+    return hasOwn(obj, 'data') && hasOwn(obj, 'slots') && !hasOwn(obj, 'requests');
+  }
+  // 設定白名單驗證（B2/B3）：回 { ok, settings, errors }；settings 為「預設 + 工作區白名單值」的完整物件
+  function sanitizeSettings(saved) {
+    const errors = [];
+    const out = defaultSettings();
+    if (saved == null) return { ok: true, settings: out, errors };
+    if (!isPlainObj(saved)) return { ok: false, settings: null, errors: [{ path: 'workspace.settings', msg: 'settings 必須為物件' }] };
+    if (hasOwn(saved, 'tmlim')) {
+      if (Number.isInteger(saved.tmlim) && saved.tmlim >= 1) out.tmlim = saved.tmlim;
+      else errors.push({ path: 'workspace.settings.tmlim', msg: 'tmlim 必須為 ≥ 1 的整數' });
     }
-    const skipped = [];
-    state.slots = { manual: null, milp: null, ga: null };
-    Object.keys(saved.slots || {}).forEach((k) => {
-      if (!(k in state.slots)) return;
-      const s = saved.slots[k]; if (!s) return;
-      if (!s.data || !Array.isArray(s.schedule) || !E.validateData(s.data).ok) { skipped.push(k); return; }
-      try { const norm = E.normalize(s.data); state.slots[k] = makeSlot(norm, s.data, s.schedule, s.meta, Number.isInteger(s.revision) ? s.revision : rev); } catch (_) { skipped.push(k); }
+    if (hasOwn(saved, 'ga')) {
+      if (!isPlainObj(saved.ga)) errors.push({ path: 'workspace.settings.ga', msg: 'ga 必須為物件' });
+      else {
+        const ga = out.ga;
+        GA_KEYS.forEach((k) => {
+          if (!hasOwn(saved.ga, k)) return;
+          const v = saved.ga[k];
+          const okType = (k === 'encoding' || k === 'directMode') ? typeof v === 'string' : (v === null && k === 'lambda') || typeof v === 'number';
+          if (!okType) { errors.push({ path: 'workspace.settings.ga.' + k, msg: '型別不合法' }); return; }
+          ga[k] = v;
+        });
+        const v = validateGaParams(ga);
+        if (!v.ok) v.errors.forEach((e) => errors.push({ path: 'workspace.settings.ga.' + e.path, msg: e.msg }));
+      }
+    }
+    return { ok: errors.length === 0, settings: errors.length ? null : out, errors };
+  }
+  // 解槽驗證（B1）：在區域變數完成 data 驗證、schedule 元素結構、引用檢查；結構不合法（schema／duplicate-request）→ 略過；
+  // 結構合法但有資源／時窗衝突 → 保留為不可行槽（可標紅播放）
+  function buildSlotFromSaved(s, fallbackRev) {
+    if (!isPlainObj(s)) return { ok: false, why: 'not-object' };
+    if (!Array.isArray(s.schedule)) return { ok: false, why: 'schedule-not-array' };
+    if (!E.validateData(s.data).ok) return { ok: false, why: 'data-invalid' };
+    let norm; try { norm = E.normalize(s.data); } catch (_) { return { ok: false, why: 'normalize-failed' }; }
+    const fe = E.checkFeasible(norm, s.schedule);
+    const structural = fe.violations.some((v) => v.rule === 'schema' || v.rule === 'duplicate-request');
+    if (structural) return { ok: false, why: 'schema' };
+    if (s.schedule.some((it) => !isPlainObj(it) || !norm.reqById.has(it.req) || !norm.antById.has(it.antenna) || !Number.isInteger(it.start))) return { ok: false, why: 'unknown-reference' };
+    const rev = Number.isInteger(s.revision) && s.revision > 0 ? s.revision : fallbackRev;
+    const meta = isPlainObj(s.meta) ? s.meta : {};
+    return { ok: true, slot: makeSlot(norm, s.data, clone(s.schedule), meta, rev) };
+  }
+  // 還原（boot 與匯入共用；B2）：全部先在區域變數驗證，通過後才一次套用；任何失敗回傳錯誤且不動現有狀態
+  function restoreWorkspace(saved) {
+    const errors = [];
+    if (!isPlainObj(saved)) return { ok: false, errors: [{ path: 'workspace', msg: '工作區必須為物件' }] };
+    if (hasOwn(saved, 'format')) {
+      if (saved.format !== WS_TAG) errors.push({ path: 'workspace.format', msg: `不支援的 format：${E.fmt(saved.format)}（需為 ${WS_TAG}）` });
+      if (!(Number.isInteger(saved.version) && saved.version >= 1 && saved.version <= WS_VERSION)) errors.push({ path: 'workspace.version', msg: `不支援的 version：${E.fmt(saved.version)}（支援 1..${WS_VERSION}）` });
+    }
+    if (!hasOwn(saved, 'data')) errors.push({ path: 'workspace.data', msg: '工作區缺少 data' });
+    else { const v = E.validateData(saved.data); if (!v.ok) v.errors.forEach((e) => errors.push({ path: 'workspace.data.' + e.path, msg: e.msg })); }
+    if (hasOwn(saved, 'slots') && saved.slots != null && !isPlainObj(saved.slots)) errors.push({ path: 'workspace.slots', msg: 'slots 必須為物件' });
+    if (hasOwn(saved, 'revision') && !(Number.isInteger(saved.revision) && saved.revision > 0)) errors.push({ path: 'workspace.revision', msg: 'revision 必須為正整數' });
+    const st = sanitizeSettings(hasOwn(saved, 'settings') ? saved.settings : null);
+    st.errors.forEach((e) => errors.push(e));
+    if (errors.length) return { ok: false, errors };
+    let norm; try { norm = E.normalize(saved.data); } catch (e) { return { ok: false, errors: [{ path: 'workspace.data', msg: '正規化失敗：' + (e && e.message) }] }; }
+    const rev = hasOwn(saved, 'revision') ? saved.revision : 1;
+    // 解槽：只接受三個自有鍵
+    const slots = { manual: null, milp: null, ga: null }, skipped = [];
+    if (isPlainObj(saved.slots)) SLOT_KEYS.forEach((k) => {
+      if (!hasOwn(saved.slots, k) || saved.slots[k] == null) return;
+      const r = buildSlotFromSaved(saved.slots[k], rev);
+      if (r.ok) slots[k] = r.slot; else skipped.push(k + '（' + r.why + '）');
     });
-    state.activeSlot = ['manual', 'milp', 'ga'].includes(saved.activeSlot) ? saved.activeSlot : 'milp';
+    const activeSlot = SLOT_KEYS.includes(saved.activeSlot) ? saved.activeSlot : 'milp';
+    // ---- 全部通過，才套用 ----
+    const c = commit(saved.data, { revision: rev });
+    if (!c.ok) return c;   // 理論上不會發生（已驗證），保險
+    state.settings = st.settings;
+    if ($('#tmlim')) $('#tmlim').value = state.settings.tmlim;
+    writeGaParams(fullGaParams(state.settings.ga));   // B3：完整回填（λ null → 空白）
+    state.slots = slots;
+    state.activeSlot = activeSlot;
     syncPlay(); saveLS(); renderAll();
     return { ok: true, skipped };
   }
   function importWorkspace(obj) {
     const r = restoreWorkspace(obj);
     if (!r.ok) { showErrors(r.errors); return r; }
-    showErrors(r.skipped.length ? [{ path: 'workspace.slots', msg: '略過無效解槽：' + r.skipped.join(', ') }] : null);
+    showErrors(r.skipped.length ? [{ path: 'workspace.slots', msg: '已略過結構不合法的解槽：' + r.skipped.join('、') + '；其餘資料已還原' }] : null);
     renderDataTab();
     return r;
   }
@@ -452,7 +517,7 @@ self.onmessage = function (e) {
     $('#btnGaCsvStats').onclick = () => download('ga-stats.csv', csvStats(), 'text/csv');
     $('#btnGaCsvSched').onclick = () => download('ga-schedule.csv', csvSchedule(state.slots.ga), 'text/csv');
     document.querySelectorAll('[data-ga]').forEach((el) => el.addEventListener('change', () => { state.settings.ga = readGaParams(); saveLS(); }));
-    if (state.settings.ga) writeGaParams(state.settings.ga);
+    writeGaParams(fullGaParams(state.settings.ga));
     window.addEventListener('resize', () => { if (!$('#tab-ga').classList.contains('hidden')) drawGaChart(); });
   }
   function setGaStatus(html) { $('#gaStatus').innerHTML = html; }
@@ -612,7 +677,7 @@ self.onmessage = function (e) {
   }
   function csvSchedule(slot) {
     const rows = [['req', 'satellite', 'antenna', 'station', 'band', 'start', 'end', 'startHHMM', 'endHHMM', 'wait']];
-    if (slot) slot.schedule.forEach((it) => { const r = slot.norm.reqById.get(it.req), a = slot.norm.antById.get(it.antenna); if (!r || !a) return; rows.push([r.id, r.sat, a.id, a.station, r.band, it.start, it.start + r.durMin, E.minutesToHHMM(slot.norm, it.start), E.minutesToHHMM(slot.norm, it.start + r.durMin), it.start - r.start]); });
+    if (slot) slot.schedule.forEach((it) => { if (!it || typeof it !== 'object') return; const r = slot.norm.reqById.get(it.req), a = slot.norm.antById.get(it.antenna); if (!r || !a || !Number.isInteger(it.start)) return; rows.push([r.id, r.sat, a.id, a.station, r.band, it.start, it.start + r.durMin, E.minutesToHHMM(slot.norm, it.start), E.minutesToHHMM(slot.norm, it.start + r.durMin), it.start - r.start]); });
     return rows.map((r) => r.map(csvEsc).join(',')).join('\n') + '\n';
   }
 
@@ -667,6 +732,7 @@ self.onmessage = function (e) {
     const x = (t) => left + (t / norm.H) * plotW;
     const blocks = [];
     (schedule || []).forEach((it) => {
+      if (!it || typeof it !== 'object') return;
       const r = norm.reqById.get(it.req), a = norm.antById.get(it.antenna);
       const ri = a ? rows.indexOf(a.id) : -1;
       if (!r || !a || ri < 0 || !Number.isInteger(it.start)) return;
@@ -721,7 +787,7 @@ self.onmessage = function (e) {
       ctx.font = '11px system-ui, sans-serif';
     });
     if (slot && !slot.feasible) {
-      const bad = new Set(slot.violations.flatMap((v) => v.reqs));
+      const bad = new Set(slot.violations.flatMap((v) => v.reqs || []));
       ctx.strokeStyle = C('--bad'); ctx.lineWidth = 2;
       L.blocks.forEach((b) => { if (bad.has(b.req)) { roundRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.stroke(); } });
       ctx.lineWidth = 1;
@@ -752,7 +818,7 @@ self.onmessage = function (e) {
 
   // ---------- 托盤（未排入需求） ----------
   function renderTray(norm, schedule) {
-    const assigned = new Set((schedule || []).map((it) => it.req));
+    const assigned = new Set((schedule || []).filter((it) => it && typeof it === 'object').map((it) => it.req));
     const chips = norm.requests.filter((r) => !assigned.has(r.id));
     $('#trayChips').innerHTML = chips.length ? chips.map((r) => `<span class="chip" data-chip="${esc(r.id)}" style="background:${esc((norm.satById.get(r.sat) || {}).color || '#888')}">${esc(r.id)} · ${esc(r.band)} · ${r.durMin}m</span>`).join('') : '<span class="muted small">（全部已排入）</span>';
   }
@@ -933,6 +999,7 @@ self.onmessage = function (e) {
       ctx.clearRect(0, 0, cssW, cssH);
       const hint = $('#winEditorHint'); if (hint) { hint.classList.toggle('hidden', Lr.validH); hint.textContent = Lr.validH ? '' : 'H（時間軸長度）不是正整數：時窗編輯器已停用拖曳，修正 H 後恢復。'; }
       canvas.classList.toggle('disabled', !Lr.validH);
+      if (!Lr.validH) drag = null;   // B4：重畫時發現 H 無效，立即清除既有拖曳
       const plotW = cssW - G.left - G.right, x = (t) => G.left + (t / Lr.H) * plotW;
       ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'middle';
       const step = Lr.H <= 60 ? 5 : Lr.H <= 240 ? 15 : 60;
@@ -963,7 +1030,9 @@ self.onmessage = function (e) {
     canvas.addEventListener('pointermove', (e) => {
       const r = canvas.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
       if (!drag) { const h = (state.lastWinEditor && state.lastWinEditor.validH) ? hit(px, py) : null; canvas.style.cursor = h ? (h.part === 'move' ? 'grab' : 'ew-resize') : 'default'; return; }
-      const W = state.lastWinEditor; const item = state.draft[drag.row.kind][drag.row.index]; if (!item) return;
+      const W = state.lastWinEditor;
+      if (!W || !W.validH) { drag = null; canvas.style.cursor = 'not-allowed'; return; }   // B4：H 在拖曳中變無效 → 作廢，不改 draft
+      const item = state.draft[drag.row.kind][drag.row.index]; if (!item) { drag = null; return; }
       const t = toT(px);
       if (drag.part === 'start') item.start = Math.max(0, Math.min(item.end - 1, t));
       else if (drag.part === 'end') item.end = Math.max(item.start + 1, Math.min(W.H, t));
@@ -1012,11 +1081,16 @@ self.onmessage = function (e) {
   function boot() {
     initChrome(); initData(); initModel(); initGA(); initSched(); initGanttDrag(); initPlayback(); initWinEditor();
     const saved = loadLS();
-    const loaded = !!(saved && restoreWorkspace(saved).ok);
-    if (!loaded) commit(clone(root.SGS_DEFAULT_DATA), { revision: 1 });
+    let restored = null;
+    if (saved) { try { restored = restoreWorkspace(saved); } catch (e) { restored = { ok: false, errors: [{ path: 'storage', msg: '還原失敗：' + (e && e.message) }] }; } }
+    if (!restored || !restored.ok) {
+      state.settings = defaultSettings();
+      commit(clone(root.SGS_DEFAULT_DATA), { revision: 1 });
+      writeGaParams(fullGaParams(state.settings.ga));
+      if (saved) showErrors([{ path: 'storage', msg: '瀏覽器儲存的工作區無法還原，已載入預設資料：' + restored.errors.map((e) => e.path + ' ' + e.msg).join('；') }]);
+    } else if (restored.skipped.length) showErrors([{ path: 'storage.slots', msg: '已略過結構不合法的解槽：' + restored.skipped.join('、') }]);
     state.draft = clone(state.data);
     $('#tmlim').value = state.settings.tmlim;
-    if (state.settings.ga && Object.keys(state.settings.ga).length) writeGaParams(state.settings.ga);   // A2：重開頁面回填已保存的 GA 參數（λ null → 空白）
     renderDataTab(); renderAll();
   }
 
@@ -1028,7 +1102,7 @@ self.onmessage = function (e) {
     _setWorkerFactory: (fn) => { workerFactory = fn; },
     setTime, startPlay, pausePlay, setManualTask, ensureManual, manualBase, viewNorm, isViewStale, cancelDrag, drawAnim, getFit,
     getDraft: () => state.draft,
-    exportWorkspace, importWorkspace, restoreWorkspace, isWorkspace, exportSchedule, saveLS,
+    exportWorkspace, importWorkspace, restoreWorkspace, isWorkspace, sanitizeSettings, buildSlotFromSaved, defaultSettings, fullGaParams, exportSchedule, saveLS,
     _setGLPKFactory: (fn) => { destroyGLPK(); glpkFactory = fn; },
     _glpkDebug: () => ({ inst: glpkInst, pending: !!glpkPromise, gen: glpkGen }),
     _warmGLPK: () => initGLPK(),   // 模擬 boot 的閒置初始化（測試用）

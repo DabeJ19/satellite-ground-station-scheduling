@@ -1,0 +1,477 @@
+{
+  "date": "2026-10-18T06:20:17.919Z",
+  "url": "file:///home/claude/satellite-ground-station-scheduling/dist/index.html",
+  "offline": true,
+  "sourceCommit": "4ea23c44c387ef5b144512c580680efcf016c2b8",
+  "distSha256": "0cc694ad5f71200a947ae3a46b4f4e2bec894c9d47aacb8d84ddea914e00ee63",
+  "distBytes": 431286,
+  "os": "linux 6.18.44-fc-v139 (x64)",
+  "node": "v22.22.0",
+  "channel": "playwright-chromium",
+  "steps": [
+    {
+      "name": "offline + file://: page boots, GLPK worker ready (Blob URL, no fetch), zero external requests so far",
+      "ok": true,
+      "info": {
+        "status": "GLPK 5.0 已就緒（WebAssembly，Worker）",
+        "online": false,
+        "proto": "file:"
+      }
+    },
+    {
+      "name": "smoke LP: max x+y s.t. x+y ≤ 3 → z=3, GLP_OPT",
+      "ok": true,
+      "info": {
+        "z": 3,
+        "status": 5,
+        "opt": 5,
+        "version": "5.0"
+      }
+    },
+    {
+      "name": "PPT instance MILP offline: (Z,W)=(5,11), 已證明最佳, feasible",
+      "ok": true,
+      "info": {
+        "Z": 5,
+        "W": 11,
+        "label": "已證明最佳",
+        "feasible": true
+      }
+    },
+    {
+      "name": "GA worker starts (Blob worker, offline) and cancel settles the run without writing a slot",
+      "ok": true,
+      "info": {
+        "cancel": null,
+        "rerun": {
+          "n": 2,
+          "Z": 5
+        }
+      }
+    },
+    {
+      "name": "exports download from the single file: data JSON, workspace JSON, schedule CSV/JSON, gantt PNG, anim PNG, GA curves/stats/schedule CSV",
+      "ok": true,
+      "info": {
+        "files": [
+          {
+            "name": "sgs-data.json",
+            "bytes": 2198
+          },
+          {
+            "name": "sgs-workspace.json",
+            "bytes": 11315
+          },
+          {
+            "name": "schedule-milp.csv",
+            "bytes": 278
+          },
+          {
+            "name": "schedule-milp.json",
+            "bytes": 3560
+          },
+          {
+            "name": "gantt.png",
+            "bytes": 16765
+          },
+          {
+            "name": "animation-frame.png",
+            "bytes": 90029
+          },
+          {
+            "name": "ga-curves.csv",
+            "bytes": 3554
+          },
+          {
+            "name": "ga-stats.csv",
+            "bytes": 668
+          },
+          {
+            "name": "ga-schedule.csv",
+            "bytes": 278
+          }
+        ]
+      }
+    },
+    {
+      "name": "workspace JSON round trip: import restores data/settings/slots/activeSlot; plain data JSON still imports; invalid workspace rejected without state change",
+      "ok": true,
+      "info": {
+        "ok": true,
+        "same": true,
+        "mid": 5,
+        "plainOk": true,
+        "badOk": false,
+        "unchanged": true,
+        "errShown": true
+      }
+    },
+    {
+      "name": "B1: bad slots are skipped (null item, non-object, unknown req/antenna, non-integer start); other valid slot kept; structurally valid but conflicting manual slot kept as infeasible; no pageerror",
+      "ok": true,
+      "info": {
+        "nullItem": {
+          "ok": true,
+          "skipped": [
+            "milp（schema）"
+          ],
+          "milp": null,
+          "gaKept": true,
+          "rev": 99,
+          "errShown": true,
+          "errText": "資料驗證失敗，未建立新版本：workspace.slots — 已略過結構不合法的解槽：milp（schema）；其餘資料已還原"
+        },
+        "number": {
+          "ok": true,
+          "skipped": [
+            "milp（schema）"
+          ],
+          "milp": null,
+          "gaKept": true,
+          "rev": 99,
+          "errShown": true,
+          "errText": "資料驗證失敗，未建立新版本：workspace.slots — 已略過結構不合法的解槽：milp（schema）；其餘資料已還原"
+        },
+        "unknownReq": {
+          "ok": true,
+          "skipped": [
+            "milp（schema）"
+          ],
+          "milp": null,
+          "gaKept": true,
+          "rev": 99,
+          "errShown": true,
+          "errText": "資料驗證失敗，未建立新版本：workspace.slots — 已略過結構不合法的解槽：milp（schema）；其餘資料已還原"
+        },
+        "unknownAnt": {
+          "ok": true,
+          "skipped": [
+            "milp（schema）"
+          ],
+          "milp": null,
+          "gaKept": true,
+          "rev": 99,
+          "errShown": true,
+          "errText": "資料驗證失敗，未建立新版本：workspace.slots — 已略過結構不合法的解槽：milp（schema）；其餘資料已還原"
+        },
+        "badStart": {
+          "ok": true,
+          "skipped": [
+            "milp（schema）"
+          ],
+          "milp": null,
+          "gaKept": true,
+          "rev": 99,
+          "errShown": true,
+          "errText": "資料驗證失敗，未建立新版本：workspace.slots — 已略過結構不合法的解槽：milp（schema）；其餘資料已還原"
+        },
+        "dup": {
+          "ok": true,
+          "skipped": [
+            "milp（schema）"
+          ],
+          "milp": null,
+          "gaKept": true,
+          "rev": 99,
+          "errShown": true,
+          "errText": "資料驗證失敗，未建立新版本：workspace.slots — 已略過結構不合法的解槽：milp（schema）；其餘資料已還原"
+        },
+        "conflict": {
+          "ok": true,
+          "skipped": [],
+          "feasible": false,
+          "rules": [
+            "window",
+            1
+          ],
+          "violVisible": true
+        },
+        "proto": {
+          "jsonOk": true,
+          "directOk": true,
+          "milp": null
+        }
+      }
+    },
+    {
+      "name": "B2: invalid settings / format / version / requests-present are rejected BEFORE any state change (data, draft, revision, settings, slots, playback, worker untouched)",
+      "ok": true,
+      "info": {
+        "gaString": {
+          "ok": false,
+          "threw": null,
+          "same": true,
+          "errShown": true
+        },
+        "seedObj": {
+          "ok": false,
+          "threw": null,
+          "same": true,
+          "errShown": true
+        },
+        "settingsArr": {
+          "ok": false,
+          "threw": null,
+          "same": true,
+          "errShown": true
+        },
+        "gaBadValue": {
+          "ok": false,
+          "threw": null,
+          "same": true,
+          "errShown": true
+        },
+        "tmlimBad": {
+          "ok": false,
+          "threw": null,
+          "same": true,
+          "errShown": true
+        },
+        "formatOther": {
+          "ok": false,
+          "threw": null,
+          "same": true,
+          "errShown": true
+        },
+        "formatNull": {
+          "ok": false,
+          "threw": null,
+          "same": true,
+          "errShown": true
+        },
+        "version999": {
+          "ok": false,
+          "threw": null,
+          "same": true,
+          "errShown": true
+        },
+        "requestsNull": {
+          "ok": false,
+          "threw": null,
+          "same": true,
+          "errShown": true
+        },
+        "slotsArr": {
+          "ok": false,
+          "threw": null,
+          "same": true,
+          "errShown": true
+        },
+        "revBad": {
+          "ok": false,
+          "threw": null,
+          "same": true,
+          "errShown": true
+        },
+        "tagged": true,
+        "legacy": true,
+        "afterOk": true
+      }
+    },
+    {
+      "name": "B3: importing a workspace with ga={} restores GA controls to defaults (50/42, λ blank) and the next run uses them; partial settings are completed from fixed defaults, not the previous workspace",
+      "ok": true,
+      "info": {
+        "beforeUi": [
+          99,
+          123,
+          7
+        ],
+        "ok": true,
+        "ui": [
+          50,
+          42,
+          null,
+          "indirect",
+          20
+        ],
+        "settings": {
+          "encoding": "indirect",
+          "directMode": "repair",
+          "lambda": null,
+          "popSize": 50,
+          "generations": 200,
+          "stagnation": 50,
+          "pc": 0.9,
+          "pm": 0.1,
+          "tournamentK": 3,
+          "elite": 2,
+          "seed": 42,
+          "runs": 20
+        },
+        "used": [
+          50,
+          42,
+          "auto"
+        ],
+        "ok2": true,
+        "ui2": [
+          10,
+          42,
+          null
+        ],
+        "settings2": [
+          10,
+          42,
+          30
+        ]
+      }
+    },
+    {
+      "name": "B1/B2/B3 boot path: bad slot / bad settings / ga={} in localStorage → boot completes (defaults or partial restore), no pageerror",
+      "ok": true,
+      "info": {
+        "a": {
+          "rev": 7,
+          "name": "PPT week6 Given Data",
+          "milp": null,
+          "ga": 1,
+          "ui": {
+            "encoding": "indirect",
+            "directMode": "repair",
+            "lambda": null,
+            "popSize": 50,
+            "generations": 200,
+            "stagnation": 50,
+            "pc": 0.9,
+            "pm": 0.1,
+            "tournamentK": 3,
+            "elite": 2,
+            "seed": 42,
+            "runs": 20
+          },
+          "err": "資料驗證失敗，未建立新版本：storage.slots — 已略過結構不合法的解槽：milp（schema）",
+          "errShown": true,
+          "pageErrors": []
+        },
+        "b": {
+          "rev": 1,
+          "name": "PPT week6 Given Data",
+          "milp": null,
+          "ga": null,
+          "ui": {
+            "encoding": "indirect",
+            "directMode": "repair",
+            "lambda": null,
+            "popSize": 50,
+            "generations": 200,
+            "stagnation": 50,
+            "pc": 0.9,
+            "pm": 0.1,
+            "tournamentK": 3,
+            "elite": 2,
+            "seed": 42,
+            "runs": 20
+          },
+          "err": "資料驗證失敗，未建立新版本：storage — 瀏覽器儲存的工作區無法還原，已載入預設資料：workspace.settings.ga ga 必須為物件",
+          "errShown": true,
+          "pageErrors": []
+        },
+        "c": {
+          "rev": 3,
+          "name": "PPT week6 Given Data",
+          "milp": null,
+          "ga": null,
+          "ui": {
+            "encoding": "indirect",
+            "directMode": "repair",
+            "lambda": null,
+            "popSize": 50,
+            "generations": 200,
+            "stagnation": 50,
+            "pc": 0.9,
+            "pm": 0.1,
+            "tournamentK": 3,
+            "elite": 2,
+            "seed": 42,
+            "runs": 20
+          },
+          "err": "",
+          "errShown": false,
+          "pageErrors": []
+        }
+      }
+    },
+    {
+      "name": "theme toggle: switches data-theme and persists across reload (storage available)",
+      "ok": true,
+      "info": {
+        "t0": "dark",
+        "t1": "light"
+      }
+    },
+    {
+      "name": "A1/B4: band/color edits redraw the window editor; invalid H shows hint, disables dragging (also mid-drag), and restores after fix",
+      "ok": true,
+      "info": {
+        "n1": 1,
+        "n2": 2,
+        "n3": 3,
+        "validH": false,
+        "H": 40,
+        "hintShown": true,
+        "hintText": "H（時間軸長度）不是正整數：時窗編輯器已停用拖曳，修正 H 後恢復。",
+        "disabled": true
+      }
+    },
+    {
+      "name": "A2: 60 satellites → animation canvas enlarges inside a scrollable wrapper; all orbits fit; 3 satellites unchanged",
+      "ok": true,
+      "info": {
+        "base": {
+          "w": 500,
+          "h": 420,
+          "scroll": false,
+          "need": 120
+        },
+        "size": {
+          "w": 1032,
+          "h": 1032,
+          "scroll": true,
+          "need": 1032
+        },
+        "scrollClass": true,
+        "scrollable": true,
+        "canvasW": 1032,
+        "wrapW": 502,
+        "outer": 492,
+        "minGap": 8,
+        "after": {
+          "w": 504,
+          "h": 420,
+          "scroll": false,
+          "need": 120
+        }
+      }
+    },
+    {
+      "name": "no page errors, zero external requests (offline context)",
+      "ok": true,
+      "info": {
+        "errors": 0,
+        "external": 0
+      }
+    },
+    {
+      "name": "storage failure: page boots with defaults, warning banner shown, operations (edit/commit/manual drag/MILP/theme/export) still work, saveLS returns false",
+      "ok": true,
+      "info": {
+        "bannerShown": true,
+        "saved": false,
+        "load": true,
+        "manual": 1,
+        "themeChanged": true,
+        "rev": 2,
+        "wsOk": true,
+        "bannerText": "瀏覽器儲存不可用（localStorage 失敗）：本次操作只保存在記憶體，關閉頁面即遺失。請用「匯出 JSON」備份資料。"
+      }
+    }
+  ],
+  "browser": {
+    "name": "chromium",
+    "version": "141.0.7390.37"
+  },
+  "passed": 15,
+  "errors": [],
+  "external": []
+}

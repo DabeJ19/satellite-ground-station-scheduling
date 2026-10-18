@@ -165,3 +165,12 @@
 | A1 收尾 | band／color 重畫；H 無效 → 提示＋停用拖曳（顯示用目前版本 H） | Codex S3-r2 建議 |
 | A2 收尾 | `anim.fitSize`：gap < 8px 時畫布放大為正方形（需求邊長 2·(12+8n+24)），容器可捲動；小實例不變 | Codex S3-r2 建議 |
 
+## 2026-10-18 S4 Codex 審查 r1 → r2
+| 項目 | 決定 | 原因 |
+|---|---|---|
+| B1 壞解槽 | `buildSlotFromSaved()` 區域驗證（data、陣列、元素物件、引用存在、start 整數、無 schema/duplicate-request）→ 略過並提示；衝突排程保留為不可行；只接受三個自有鍵；ganttLayout/renderTray/csvSchedule 加 null 防護 | 匯入與 boot 不得因壞槽拋錯 |
+| B2 先驗後套用 | `restoreWorkspace()` 先驗 format/version、data、revision、slots 外層、settings，全部通過才 commit；`isWorkspace()` 以 hasOwnProperty 判別；boot 以 try/catch 包住，失敗載入預設並提示 | 「拒絕且不動現有狀態」 |
+| B3 設定還原 | `defaultSettings()`／`fullGaParams()`：每次還原從固定預設出發、白名單合併、完整回填控制項；預設 runs=20 與 HTML 一致 | 畫面、保存設定、下次執行三者一致 |
+| B4 拖曳中 H 無效 | 重畫時 `drag=null`；pointermove 再檢查 `validH` | 既有拖曳不得寫入 |
+| C1 驗收可追溯 | 紀錄加 sourceCommit、dist SHA-256、OS、Node、瀏覽器渠道；JSON 另存 `docs/acceptance/s4-<channel>.json`（入版控，不互相覆寫） | Codex 建議，提前落實 |
+
