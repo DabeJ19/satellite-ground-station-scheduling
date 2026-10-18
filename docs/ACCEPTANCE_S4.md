@@ -5,11 +5,11 @@
 ## 交付物辨識
 | 項目 | 值 |
 |---|---|
-| 被測程式碼 commit | `fb036dfb53ff588624417f42efb0927d443ec121` |
-| 交付 HTML | `dist/index.html`，431286 bytes，SHA-256 `c6f7bb2b2a270eccb9d80bce1cf623c6393ab60dd5035d546e5cfe93b61f1f83` |
+| 被測程式碼 commit | `083c6cb67ae2255b1e51a6eec9679a9c72d9ca20` |
+| 交付 HTML | `dist/index.html`，431869 bytes，SHA-256 `675c2bda036a971e7a99ddd401e15dab28d5a5e31e755af5a45b10f726596d9f` |
 | 作業系統 | linux 6.18.44-fc-v139 (x64)；Node v22.22.0 |
 | 瀏覽器 | **Playwright Chromium 141.0.7390.37**（渠道 `playwright-chromium`）。Google Chrome：未測。Microsoft Edge：未測（可用 `PW_CHANNEL=msedge` 重跑同一套，結果另存 `docs/acceptance/s4-msedge.json`） |
-| 日期（UTC） | 2026-10-18T06:23:04.544Z |
+| 日期（UTC） | 2026-10-18T10:26:53.620Z |
 
 ## 結果（15 步全部通過）
 | 項目 | 結果 |
@@ -24,6 +24,7 @@
 | 全部匯出可下載 | `sgs-data.json` 2198 B, `sgs-workspace.json` 11314 B, `schedule-milp.csv` 278 B, `schedule-milp.json` 3559 B, `gantt.png` 16765 B, `animation-frame.png` 90029 B, `ga-curves.csv` 3554 B, `ga-stats.csv` 669 B, `ga-schedule.csv` 278 B（PNG 檢查 `89504e47` 檔頭；CSV 檢查表頭與列數；JSON 解析檢查） |
 | 工作區 JSON round trip | 匯出 → 改資料／清解槽 → 匯入 → 資料、設定、三解槽、選中槽完全還原；純資料 JSON 仍可匯入；壞工作區被拒且狀態不變、顯示錯誤 |
 | 壞解槽（B1） | `[null]`／`[7]`／未知 req／未知 antenna／start 1.5／重複 req → 該槽略過並提示，其他有效槽與資料仍還原；衝突排程保留為不可行槽；原型鏈鍵不接受；boot 同樣完成 |
+| 無標記工作區（C2） | 含自有 `requests` 的無標記輸入：匯入拒絕不改狀態；boot 載入預設並提示；刪除 `requests` 後兩者皆可還原 |
 | 壞設定／外層（B2） | 11 種壞輸入皆回 ok=false、不拋錯、狀態（資料／draft／revision／設定／槽／播放／控制項）完全不變；boot 遇壞設定 → 載入預設並提示 |
 | GA 設定還原（B3） | `ga={}` → 控制項與 `readGaParams()` 回 50/42/λ 空白/runs 20，實際執行參數一致；部分設定由固定預設補齊 |
 | 主題切換 | dark → light，重載後保留（儲存可用時） |

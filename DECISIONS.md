@@ -174,3 +174,10 @@
 | B4 拖曳中 H 無效 | 重畫時 `drag=null`；pointermove 再檢查 `validH` | 既有拖曳不得寫入 |
 | C1 驗收可追溯 | 紀錄加 sourceCommit、dist SHA-256、OS、Node、瀏覽器渠道；JSON 另存 `docs/acceptance/s4-<channel>.json`（入版控，不互相覆寫） | Codex 建議，提前落實 |
 
+## 2026-10-18 S4 複審 r2 通過 → 專案收尾
+| 項目 | 決定 | 原因 |
+|---|---|---|
+| C2 無標記工作區判別 | 判別條件（自有 data、slots、無自有 requests）移入 `restoreWorkspace()`，boot 與匯入一致 | Codex 建議，收尾落實 |
+| C3 contactState 防護 | 排程遍歷開頭跳過 null／非物件／陣列；非陣列 schedule 視為空 | Codex 建議，收尾落實；anim 單元測試直接覆蓋 |
+| 專案狀態 | S0–S4 全部通過；交付物 `dist/index.html`（驗收紀錄 `docs/ACCEPTANCE_S4.md`） | — |
+

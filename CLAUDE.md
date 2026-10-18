@@ -9,8 +9,8 @@
 4. `docs/reviews/` 最新的 `S<n>-codex*.md` 與 `S<n>-response.md` — 目前審查狀態
 
 ## 目前狀態（更新於每次送審）
-- S0 規格：通過。S1：r3 通過。S2：r3 通過。S3：r3 通過。S4（匯出收尾、工作區 JSON、授權區、build 自檢、離線驗收紀錄、A1/A2 收尾）：r1 退回項 B1–B4 已修正、C1 已落實，**S4-r2 待 Codex 複審**。
-- 下一步：S4 通過 → 專案收尾（README／最終 dist 交付）。
+- S0–S4 全部通過（S4 r2 通過，2026-10-18）。收尾：Codex 建議 C2／C3 已落實。**專案已交付**：`dist/index.html` ＋ `docs/ACCEPTANCE_S4.md`。
+- 後續若有維護：照同一流程（實作 → 測試全綠 → REVIEW_REQUEST/PROMPT → Codex 審查）。
 
 ## 指令
 ```

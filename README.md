@@ -21,6 +21,13 @@ npm run test:browser  # Playwright + Chromium：S1–S4 瀏覽器驗收（file:/
 - 瀏覽器儲存失敗（私密模式、配額）時降級為記憶體狀態並提示匯出 JSON 備份，所有操作仍可用。
 - 離線驗收紀錄：[docs/ACCEPTANCE_S4.md](docs/ACCEPTANCE_S4.md)。
 
+## 專案狀態
+S0（規格）→ S1（引擎＋MILP＋甘特）→ S2（GA＋實驗＋產生器）→ S3（動畫＋拖曳＋播放）→ S4（匯出＋離線驗收＋授權）全部通過雙 agent 審查（工程：Claude；審查：Codex；PO：James）。審查紀錄見 `docs/reviews/`，每輪 prompt 見 `docs/REVIEW_PROMPT_*.md`。
+
+## 驗證
+- PPT 實例最佳解 (Z, W) = (5, 11)，由 `tools/enumerate.py` 全列舉 oracle 與 MILP `GLP_OPT` 雙重確認。
+- `npm test` 78 項（engine 39、GA 19、anim 15、build 5）；`npm run test:browser` 63 步（S1 19、S2 16、S3 13、S4 15）。
+
 ## 授權
 - 本專案自有程式碼（`src/`、`build.js`、文件）：MIT。
 - `vendor/glpk/glpk-5.0.0.js`（jvail/glpk.js，GLPK 的 WebAssembly 移植）：**GPL-3.0**，見 `vendor/glpk/LICENSE`，來源 https://github.com/jvail/glpk.js 。
