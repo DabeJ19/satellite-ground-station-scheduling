@@ -1,9 +1,10 @@
 # SPEC — 太空衛星地面站排程：最佳解（MILP）與基因演算法（GA）互動工具
 
-版本：S3 draft 5（2026-10-17）　狀態：S0 規格通過；依 Codex S1 審查（docs/reviews/S1-codex.md）補 §4.2 結果有效性與預算規則
+版本：S4 draft 6（2026-10-18）　狀態：S0 規格通過；依 Codex S1 審查（docs/reviews/S1-codex.md）補 §4.2 結果有效性與預算規則
 PO：James　工程：Claude Code　審查：Codex
 
 變更摘要（draft 1 → 2）：修正 §1.3 上界證明（B1）；明定等待基準與目標計算（B2）；新增資料驗證契約與候選集合定義（B3）；重寫超時 LP 上界／gap 規則（B4）；納入 S1–S7 建議；§9 開放問題全部結案。
+變更摘要（draft 5 → 6，S4）：§6 明定資料／工作區兩種 JSON 與判別規則、排程 CSV/JSON 取選中槽與 JSON 結構、多衛星可捲動畫布、時窗編輯器無效 H 處理；§7 單檔內授權區（GPL 全文、SHA、轉換說明）。
 變更摘要（draft 4 → 5，S3-r2）：§6 明定相位擬合程序（多盆地細化、等價容差、取最小角）、弧長未取模、複合鍵 JSON、播放資料來源與拖曳版本守門。
 變更摘要（draft 2 → 3）：罰則模式負等待與可行優先證明修正（N1）；MILP/GA 共用 revision/runId 寫入閘門（N2）；S1 驗收補邊界 fixture D、MILP 轉換 oracle 與 UI 驗收（N3）；三種 CSV 匯出（C1）；統計邊界 N/A 規則（C2）。
 
@@ -100,6 +101,7 @@ GLPK 為浮點運算，回傳後一律重新以整數計算 `assigned`、`totalW
 - 解（Schedule）：`[{ "req": "R1", "antenna": "GS_1-S", "start": 5 }]`；未出現的需求 = 未排入。任務 end 一律由 `start + durMin` 衍生，不信任匯入的 duration/end。
 - 三個解槽各存一份 Schedule + 來源標記 + 評分結果 + 資料 revision。
 - 持久化：整份 state（資料 + 參數 + 三解槽）存 localStorage；JSON 匯入／匯出同一結構。所有 localStorage 存取包 try/catch，失敗時降級為記憶體狀態並提示匯出 JSON 備份；儲存失敗不得阻止排程操作。
+  - （S4 明定）兩種 JSON：**資料 JSON**（`validateData` 的結構）與**工作區 JSON**（`{format:"sgs-workspace", version, data, revision, settings, slots, activeSlot}`，與 localStorage 同一結構）。匯入自動判別：有 `format` 或（有 `data`+`slots` 且無 `requests`）視為工作區；工作區 `data` 無效 → 拒絕且不動現有狀態；壞解槽逐一略過並提示。頁面啟動還原與匯入共用同一程序。
 
 ### 2.1 資料驗證契約 `validateData()`
 在求解／匯入／資料編輯提交前執行；不合法時回報錯誤位置並停止求解，不靜默截斷或修正。
@@ -207,6 +209,8 @@ S1 使用每分鐘列；記錄候選數、列數、非零係數數、建模與�
      - **播放資料來源**（S3-r2 明定）：甘特圖、動畫、拉桿、時間標籤、循環上限一律用「選中解槽的 norm」（H、時間原點）；沒有解槽時用目前資料。切換解槽、提交資料、或任何解槽寫入（MILP／GA／手動）落在目前選中槽時：t 依新來源夾到 `[0,H]`、拉桿與標籤同步（暫停狀態維持暫停）；寫入未選中槽不改動檢視中的時間；提交資料即暫停播放並清除 rAF/last。
      - **拖曳僅限目前版本**：選中解槽為舊版本（`slot.revision ≠ state.revision`）時拒絕拖曳並顯示提示；拖曳起始記住版本，提交資料／`pointercancel`／版本改變即作廢（不寫入任何解槽）；ghost 可行性檢查與手動解槽建立使用同一基底排程。
    - 匯出：甘特圖 PNG、動畫當前幀 PNG、排程 CSV/JSON（GA 的曲線／統計 CSV 見 §5.3）。
+     - （S4 明定）排程 CSV/JSON 取**選中解槽**；檔名 `schedule-<slot>.csv/.json`；排程 JSON = `{format:"sgs-schedule", version, slot, revision, meta, score, feasible, violations, schedule, data}`（data 為該解所依據的資料版本）。
+     - （S4 明定）衛星數使固定畫布放不下（軌道間距 < 8px）時，動畫畫布依 `anim.fitSize` 放大為正方形並置於可捲動容器；軌道半徑仍遞增、外圈留 24px。時窗編輯器：H 不是正整數時顯示提示並停用拖曳；band／color 變更即重畫。
 
 ---
 
@@ -231,7 +235,7 @@ satellite-ground-station-scheduling/
   - 對 vendor glpk 檔驗證 SHA-256；確認 `export{pe as default};` 恰好出現一次且位於檔尾，否則失敗；改寫為 `window.GLPK=pe;`。此轉換為版本專用 adapter；升級 vendor 時改用 bundler 由模組入口產出 IIFE，不猜測壓縮符號，仍不改寫 `vendor/`。
   - 每個 `<!-- @inline:x -->` 標記必須恰好出現一次並完全替換。
   - 預設資料先 `JSON.parse` 驗證，再 `JSON.stringify` 並轉義 `<`、`>`、`&`、U+2028/2029；檢查內嵌 JS/CSS 不含會提前關閉元素的 `</script>`／`</style>`。
-- 單檔 HTML 內保留 glpk.js 版權與 GPL-3.0 授權聲明、確切版本、建置轉換說明與來源取得方式；README 區分自有程式授權（MIT）與內嵌依賴授權，不把整份 HTML 表述為純 MIT。
+- 單檔 HTML 內保留 glpk.js 版權與 GPL-3.0 授權聲明、確切版本、建置轉換說明與來源取得方式；README 區分自有程式授權（MIT）與內嵌依賴授權，不把整份 HTML 表述為純 MIT。（S4 明定）頁尾「授權與第三方聲明」可展開：版本、版權、來源 URL、SHA-256、轉換說明、`vendor/glpk/LICENSE` 全文（build 以 `@inline:license` 內嵌並 HTML 轉義）；`tests/build.test.js` 檢查零外部資源標記、授權文字、標記全替換。
 
 ---
 

@@ -154,6 +154,22 @@ test('A2: many satellites still fit inside the canvas (orbits shrink Earth radiu
   assert.ok(L.Re >= 12);
 });
 
+test('S4 A2: fitSize keeps small instances at the given size; 60/100 satellites → enlarged square canvas where layout keeps gap ≥ 8 and fits', () => {
+  const mk = (n) => E.normalize({ meta: { horizonMin: 60, calibDefaultMin: 0 }, bands: ['S'], satellites: Array.from({ length: n }, (_, i) => ({ id: 'S' + i })), stations: [{ id: 'G', angleDeg: 0, antennas: [{ id: 'a', band: 'S' }] }], visibility: [], requests: [] });
+  for (const n of [3, 14, 20]) { const f = A.fitSize(mk(n), 600, 420); assert.deepStrictEqual([f.w, f.h, f.scroll], [600, 420, false], 'n=' + n); }
+  for (const n of [60, 100]) {
+    const norm = mk(n); const f = A.fitSize(norm, 600, 420);
+    assert.ok(f.scroll && f.w === f.h && f.w >= 600, JSON.stringify(f));
+    const L = A.layout(norm, f.w, f.h);
+    const rs = norm.satellites.map((s) => L.orbitR.get(s.id));
+    for (let i = 1; i < rs.length; i++) assert.ok(rs[i] - rs[i - 1] >= 8 - 1e-9, 'gap n=' + n);
+    assert.ok(rs[rs.length - 1] + 24 <= f.w / 2 + 1e-9, 'outer n=' + n + ' ' + rs[rs.length - 1] + ' vs ' + f.w / 2);
+    assert.ok(L.Re >= 12);
+  }
+  // 窄畫布：以 min(w,h) 判斷；需要時兩邊都放大
+  const f = A.fitSize(mk(60), 300, 420); assert.ok(f.scroll && f.w >= 300 && f.h >= 420 && f.w === f.h);
+});
+
 (async () => {
   let passed = 0, failed = 0;
   for (const t of tests) { if (t.section) { console.log(t.section); continue; } try { await t.fn(); passed++; console.log('  ✔', t.name); } catch (e) { failed++; console.log('  ✘', t.name, '\n    ', e.message); } }

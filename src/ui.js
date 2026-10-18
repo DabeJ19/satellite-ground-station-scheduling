@@ -46,9 +46,7 @@
   // ---------- 持久化（try/catch 降級；失敗提示備份，A2） ----------
   function saveLS() {
     try {
-      const slots = {};
-      Object.keys(state.slots).forEach((k) => { const s = state.slots[k]; slots[k] = s ? { schedule: s.schedule, revision: s.revision, meta: s.meta, data: s.data } : null; });
-      localStorage.setItem(LS_KEY, JSON.stringify({ data: state.data, revision: state.revision, settings: state.settings, slots, activeSlot: state.activeSlot }));
+      localStorage.setItem(LS_KEY, JSON.stringify(snapshotWorkspace()));
       if (state.storageWarned) { state.storageWarned = false; const b = $('#storageWarn'); if (b) b.classList.add('hidden'); }
       return true;
     } catch (_) {
@@ -115,6 +113,7 @@
   function initData() {
     $('#btnLoadDefault').onclick = () => loadData(root.SGS_DEFAULT_DATA);
     $('#btnExport').onclick = () => download('sgs-data.json', JSON.stringify(state.draft, null, 2), 'application/json');
+    $('#btnExportWs').onclick = () => download('sgs-workspace.json', JSON.stringify(exportWorkspace(), null, 2), 'application/json');
     $('#btnImport').onclick = () => $('#fileImport').click();
     $('#fileImport').onchange = (e) => {
       const f = e.target.files[0]; if (!f) return;
@@ -150,7 +149,49 @@
   function importJSONText(text) {
     let obj;
     try { obj = JSON.parse(text); } catch (err) { showErrors([{ path: 'file', msg: 'JSON 解析失敗：' + err.message }]); return { ok: false }; }
+    if (isWorkspace(obj)) return importWorkspace(obj);   // 工作區 JSON（資料 + 參數 + 三解槽）
     return loadData(obj);
+  }
+  // ---------- 工作區 JSON（§6：與 localStorage 同一結構） ----------
+  const WS_TAG = 'sgs-workspace';
+  function snapshotWorkspace() {
+    const slots = {};
+    Object.keys(state.slots).forEach((k) => { const s = state.slots[k]; slots[k] = s ? { schedule: s.schedule, revision: s.revision, meta: s.meta, data: s.data } : null; });
+    return { data: state.data, revision: state.revision, settings: state.settings, slots, activeSlot: state.activeSlot };
+  }
+  function exportWorkspace() { return Object.assign({ format: WS_TAG, version: 1, exportedAt: new Date().toISOString() }, snapshotWorkspace()); }
+  function isWorkspace(obj) { return !!(obj && typeof obj === 'object' && !Array.isArray(obj) && (obj.format === WS_TAG || (obj.data && typeof obj.data === 'object' && obj.slots && typeof obj.slots === 'object' && !obj.requests))); }
+  // 還原（boot 與匯入共用）：資料無效 → 回傳錯誤、不動現有狀態；解槽逐一驗證，壞的略過
+  function restoreWorkspace(saved) {
+    if (!saved || !saved.data) return { ok: false, errors: [{ path: 'workspace.data', msg: '工作區缺少 data' }] };
+    const v = E.validateData(saved.data);
+    if (!v.ok) return { ok: false, errors: v.errors.map((e) => ({ path: 'workspace.data.' + e.path, msg: e.msg })) };
+    const rev = Number.isInteger(saved.revision) && saved.revision > 0 ? saved.revision : 1;
+    const r = commit(saved.data, { revision: rev });
+    if (!r.ok) return r;
+    if (saved.settings && typeof saved.settings === 'object') {
+      state.settings = Object.assign(state.settings, saved.settings);
+      if (Number.isInteger(state.settings.tmlim) && $('#tmlim')) $('#tmlim').value = state.settings.tmlim;
+      if (state.settings.ga && Object.keys(state.settings.ga).length) writeGaParams(state.settings.ga);
+    }
+    const skipped = [];
+    state.slots = { manual: null, milp: null, ga: null };
+    Object.keys(saved.slots || {}).forEach((k) => {
+      if (!(k in state.slots)) return;
+      const s = saved.slots[k]; if (!s) return;
+      if (!s.data || !Array.isArray(s.schedule) || !E.validateData(s.data).ok) { skipped.push(k); return; }
+      try { const norm = E.normalize(s.data); state.slots[k] = makeSlot(norm, s.data, s.schedule, s.meta, Number.isInteger(s.revision) ? s.revision : rev); } catch (_) { skipped.push(k); }
+    });
+    state.activeSlot = ['manual', 'milp', 'ga'].includes(saved.activeSlot) ? saved.activeSlot : 'milp';
+    syncPlay(); saveLS(); renderAll();
+    return { ok: true, skipped };
+  }
+  function importWorkspace(obj) {
+    const r = restoreWorkspace(obj);
+    if (!r.ok) { showErrors(r.errors); return r; }
+    showErrors(r.skipped.length ? [{ path: 'workspace.slots', msg: '略過無效解槽：' + r.skipped.join(', ') }] : null);
+    renderDataTab();
+    return r;
   }
   function loadData(obj) {
     const v = E.validateData(obj);
@@ -203,7 +244,7 @@
     const p = el.dataset.path; if (!p) return;
     if (el.dataset.moveAntenna != null) return; // 換站在 change 處理
     setByPath(state.draft, p, parseByType(el.dataset.type || 'text', el.value));
-    if (/\.(start|end|durMin|sat|station|id)$/.test(p) && SGS.app && SGS.app._drawWinEditor) SGS.app._drawWinEditor();   // A1：影響列標籤／範圍的欄位都重畫
+    if (/\.(start|end|durMin|sat|station|id|band|color)$/.test(p) && SGS.app && SGS.app._drawWinEditor) SGS.app._drawWinEditor();   // A1：影響列標籤／範圍／顏色的欄位都重畫
   }
   // change（失焦／選單）：引用 id 或頻段改變 → 重建選單；天線換站
   function onDraftChange(e) {
@@ -579,9 +620,17 @@ self.onmessage = function (e) {
   function initSched() {
     $('#slotSel').addEventListener('click', (e) => { const b = e.target.closest('button[data-slot]'); if (!b) return; state.activeSlot = b.dataset.slot; cancelDrag(); saveLS(); syncPlay(); renderSched(); });
     $('#btnGanttPng').onclick = () => { $('#gantt').toBlob((blob) => downloadBlob('gantt.png', blob)); };
+    $('#btnSchedCsv').onclick = () => download(`schedule-${state.activeSlot}.csv`, csvSchedule(state.slots[state.activeSlot]), 'text/csv');
+    $('#btnSchedJson').onclick = () => download(`schedule-${state.activeSlot}.json`, JSON.stringify(exportSchedule(state.activeSlot), null, 2), 'application/json');
     window.addEventListener('resize', () => { if (!$('#tab-sched').classList.contains('hidden')) drawGantt(); });
   }
 
+  // 排程 JSON（選中解槽）：排程 + 評分 + 可行性 + 該解所依據的資料版本
+  function exportSchedule(name) {
+    const s = state.slots[name];
+    if (!s) return { format: 'sgs-schedule', version: 1, slot: name, revision: null, schedule: [], score: null, feasible: null, violations: [], data: null };
+    return { format: 'sgs-schedule', version: 1, slot: name, revision: s.revision, meta: s.meta || {}, score: s.score, feasible: s.feasible, violations: s.violations, schedule: s.schedule, data: s.data };
+  }
   function renderSched() {
     $('#slotSel').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.slot === state.activeSlot));
     const names = { manual: '手動', milp: 'MILP', ga: 'GA' };
@@ -844,15 +893,21 @@ self.onmessage = function (e) {
     const canvas = $('#anim'); if (!canvas) return;
     const slot = state.slots[state.activeSlot];
     const norm = slot ? slot.norm : state.norm; if (!norm) return;
-    const dpr = window.devicePixelRatio || 1, cssW = canvas.clientWidth || 500, cssH = 420;
-    canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr); canvas.style.height = cssH + 'px';
+    const dpr = window.devicePixelRatio || 1;
+    const wrap = canvas.parentElement;
+    const cardW = (wrap && wrap.parentElement) ? wrap.parentElement.clientWidth - 32 : 0;   // 卡片內寬（padding 16×2），不受前一幀畫布尺寸影響
+    const availW = cardW > 50 ? cardW : (canvas.clientWidth || 500), availH = 420;         // 分頁隱藏時 clientWidth 為 0 → 退回 500
+    const fs = SGS.anim.fitSize(norm, availW, availH);          // A2：衛星多到放不下 → 畫布放大、容器可捲動
+    const cssW = fs.w, cssH = fs.h;
+    canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr); canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
+    if (wrap) wrap.classList.toggle('scroll', fs.scroll);
     const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
     const cs = getComputedStyle(document.documentElement); const C = (n) => cs.getPropertyValue(n).trim();
     const theme = { bg: C('--bg'), panel: C('--panel'), text: C('--text'), muted: C('--muted'), line: C('--line'), accent: C('--accent'), calib: C('--calib') };
     const satColor = (id) => { const s = norm.satById.get(id); return (s && s.color) || palette(norm.satellites.findIndex((q) => q.id === id)); };
     const fit = getFit(norm);
     state.lastAnim = SGS.anim.drawFrame(ctx, norm, slot ? slot.schedule : [], state.play.t, fit, { w: cssW, h: cssH, theme, satColor, showResidual: $('#showResidual').checked });
-    state.lastAnim.t = state.play.t; state.lastAnim.fit = { omega: fit.omega, phis: Object.fromEntries(Array.from(fit.sats.entries()).map(([k, v]) => [k, v.phi])), residuals: Object.fromEntries(Array.from(fit.sats.entries()).map(([k, v]) => [k, v.residual])) };
+    state.lastAnim.t = state.play.t; state.lastAnim.size = { w: cssW, h: cssH, scroll: fs.scroll, need: fs.need }; state.lastAnim.fit = { omega: fit.omega, phis: Object.fromEntries(Array.from(fit.sats.entries()).map(([k, v]) => [k, v.phi])), residuals: Object.fromEntries(Array.from(fit.sats.entries()).map(([k, v]) => [k, v.residual])) };
   }
 
   // ---------- 時窗時間軸編輯（資料分頁，拖曳改 start/end；改 draft，需套用） ----------
@@ -864,8 +919,8 @@ self.onmessage = function (e) {
       const rows = [];
       (d.visibility || []).forEach((v, i) => rows.push({ kind: 'visibility', index: i, label: `${v.sat} @ ${v.station}`, start: v.start, end: v.end, color: (d.satellites.find((s) => s.id === v.sat) || {}).color || '#888' }));
       (d.requests || []).forEach((r, i) => rows.push({ kind: 'requests', index: i, label: `${r.id} (${r.sat}, ${r.band}, ${r.durMin}m)`, start: r.start, end: r.end, color: (d.satellites.find((s) => s.id === r.sat) || {}).color || '#888', hatched: true }));
-      const H = Number.isInteger(d.meta.horizonMin) && d.meta.horizonMin > 0 ? d.meta.horizonMin : 1;
-      return { rows, H };
+      const validH = Number.isInteger(d.meta.horizonMin) && d.meta.horizonMin > 0;
+      return { rows, H: validH ? d.meta.horizonMin : (state.norm ? state.norm.H : 1), validH };   // 無效 H：以目前版本 H 僅供顯示，拖曳停用
     };
     const geom = (cssW) => ({ left: 170, right: 16, top: 24, rowH: 22 });
     function draw() {
@@ -876,6 +931,8 @@ self.onmessage = function (e) {
       const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
       const cs = getComputedStyle(document.documentElement); const C = (n) => cs.getPropertyValue(n).trim();
       ctx.clearRect(0, 0, cssW, cssH);
+      const hint = $('#winEditorHint'); if (hint) { hint.classList.toggle('hidden', Lr.validH); hint.textContent = Lr.validH ? '' : 'H（時間軸長度）不是正整數：時窗編輯器已停用拖曳，修正 H 後恢復。'; }
+      canvas.classList.toggle('disabled', !Lr.validH);
       const plotW = cssW - G.left - G.right, x = (t) => G.left + (t / Lr.H) * plotW;
       ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'middle';
       const step = Lr.H <= 60 ? 5 : Lr.H <= 240 ? 15 : 60;
@@ -890,7 +947,7 @@ self.onmessage = function (e) {
         ctx.fillStyle = C('--text'); ctx.fillRect(bx, y + 4, 3, G.rowH - 8); ctx.fillRect(bx + bw - 3, y + 4, 3, G.rowH - 8);
         ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = '10px system-ui, sans-serif'; ctx.fillText(`${r.start}–${r.end}`, bx + bw / 2, y + G.rowH / 2); ctx.font = '11px system-ui, sans-serif';
       });
-      state.lastWinEditor = { rows: Lr.rows.map((r) => ({ kind: r.kind, index: r.index, start: r.start, end: r.end })), H: Lr.H, left: G.left, plotW, top: G.top, rowH: G.rowH };
+      state.lastWinEditor = { rows: Lr.rows.map((r) => ({ kind: r.kind, index: r.index, start: r.start, end: r.end })), H: Lr.H, validH: Lr.validH, left: G.left, plotW, top: G.top, rowH: G.rowH };
     }
     const hit = (px, py) => {
       const W = state.lastWinEditor; if (!W) return null;
@@ -905,7 +962,7 @@ self.onmessage = function (e) {
     const toT = (px) => { const W = state.lastWinEditor; return Math.round(((px - W.left) / W.plotW) * W.H); };
     canvas.addEventListener('pointermove', (e) => {
       const r = canvas.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
-      if (!drag) { const h = hit(px, py); canvas.style.cursor = h ? (h.part === 'move' ? 'grab' : 'ew-resize') : 'default'; return; }
+      if (!drag) { const h = (state.lastWinEditor && state.lastWinEditor.validH) ? hit(px, py) : null; canvas.style.cursor = h ? (h.part === 'move' ? 'grab' : 'ew-resize') : 'default'; return; }
       const W = state.lastWinEditor; const item = state.draft[drag.row.kind][drag.row.index]; if (!item) return;
       const t = toT(px);
       if (drag.part === 'start') item.start = Math.max(0, Math.min(item.end - 1, t));
@@ -915,6 +972,7 @@ self.onmessage = function (e) {
     });
     canvas.addEventListener('pointerdown', (e) => {
       const r = canvas.getBoundingClientRect(); const px = e.clientX - r.left, py = e.clientY - r.top;
+      if (!state.lastWinEditor || !state.lastWinEditor.validH) return;   // A1：無效 H 不接受拖曳
       const h = hit(px, py); if (!h) return;
       e.preventDefault();
       drag = { row: h.row, part: h.part, len: h.row.end - h.row.start, offset: toT(px) - h.row.start };
@@ -954,19 +1012,7 @@ self.onmessage = function (e) {
   function boot() {
     initChrome(); initData(); initModel(); initGA(); initSched(); initGanttDrag(); initPlayback(); initWinEditor();
     const saved = loadLS();
-    let loaded = false;
-    if (saved && saved.data && E.validateData(saved.data).ok) {
-      state.settings = Object.assign(state.settings, saved.settings || {});
-      state.activeSlot = saved.activeSlot || 'milp';
-      if (commit(saved.data, { revision: saved.revision || 1 }).ok) {
-        Object.keys(saved.slots || {}).forEach((k) => {
-          const s = saved.slots[k]; if (!s || !s.data || !Array.isArray(s.schedule) || !E.validateData(s.data).ok) return;
-          try { const norm = E.normalize(s.data); state.slots[k] = makeSlot(norm, s.data, s.schedule, s.meta, s.revision); } catch (_) {}
-        });
-        syncPlay();
-        loaded = true;
-      }
-    }
+    const loaded = !!(saved && restoreWorkspace(saved).ok);
     if (!loaded) commit(clone(root.SGS_DEFAULT_DATA), { revision: 1 });
     state.draft = clone(state.data);
     $('#tmlim').value = state.settings.tmlim;
@@ -982,6 +1028,7 @@ self.onmessage = function (e) {
     _setWorkerFactory: (fn) => { workerFactory = fn; },
     setTime, startPlay, pausePlay, setManualTask, ensureManual, manualBase, viewNorm, isViewStale, cancelDrag, drawAnim, getFit,
     getDraft: () => state.draft,
+    exportWorkspace, importWorkspace, restoreWorkspace, isWorkspace, exportSchedule, saveLS,
     _setGLPKFactory: (fn) => { destroyGLPK(); glpkFactory = fn; },
     _glpkDebug: () => ({ inst: glpkInst, pending: !!glpkPromise, gen: glpkGen }),
     _warmGLPK: () => initGLPK(),   // 模擬 boot 的閒置初始化（測試用）

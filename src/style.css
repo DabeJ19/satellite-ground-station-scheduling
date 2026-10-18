@@ -89,3 +89,11 @@ canvas#gantt.dragging { cursor: grabbing; }
 .tray.over { border-color: var(--accent); background: rgba(79,142,247,.08); }
 .chip { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; color: #fff; cursor: grab; user-select: none; }
 
+
+.animWrap { position: relative; overflow: auto; min-width: 0; max-width: 100%; }
+.animWrap.scroll { max-height: 520px; border: 1px dashed var(--line); border-radius: 8px; }
+.animWrap canvas#anim { width: auto; display: block; }
+.grid2.sched > .card { min-width: 0; }
+canvas#winEditor.disabled { opacity: .55; cursor: not-allowed; }
+footer details summary { cursor: pointer; }
+footer a { color: var(--accent); }

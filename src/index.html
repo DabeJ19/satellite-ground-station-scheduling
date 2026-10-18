@@ -27,9 +27,10 @@
   <section class="tab" id="tab-data">
     <div class="toolbar">
       <button id="btnLoadDefault">載入 PPT 預設資料</button>
-      <button id="btnImport">匯入 JSON</button>
+      <button id="btnImport" title="接受資料 JSON 或工作區 JSON">匯入 JSON</button>
       <input type="file" id="fileImport" accept="application/json" hidden>
-      <button id="btnExport">匯出 JSON</button>
+      <button id="btnExport" title="目前編輯中的資料（含未套用變更）">匯出資料 JSON</button>
+      <button id="btnExportWs" title="資料 + 參數 + 三解槽（與瀏覽器儲存同一結構）">匯出工作區 JSON</button>
       <span class="spacer"></span>
       <button id="btnRevert" class="ghost">還原未套用變更</button>
       <button id="btnApply" class="primary">套用變更（驗證 → 新版本）</button>
@@ -70,6 +71,7 @@
     </div>
     <div class="card" style="margin-top:14px">
       <h3>時窗時間軸 <span class="muted small">拖曳條的左右端改 start／end，拖曳中段整段平移；改完按「套用變更」</span></h3>
+      <div id="winEditorHint" class="small hidden" style="color:var(--warn);margin-bottom:6px"></div>
       <canvas id="winEditor" height="200"></canvas>
     </div>
     <div class="card" style="margin-top:14px">
@@ -168,6 +170,8 @@
         <button data-slot="ga">GA</button>
       </div>
       <span class="spacer"></span>
+      <button id="btnSchedCsv" class="ghost">排程 CSV</button>
+      <button id="btnSchedJson" class="ghost">排程 JSON</button>
       <button id="btnGanttPng" class="ghost">甘特圖 PNG</button>
     </div>
     <div class="cards3" id="scoreCards"></div>
@@ -193,12 +197,23 @@
       </div>
       <div class="card">
         <h3>衛星繞地示意動畫 <span class="muted small">軌道為示意，接觸狀態以輸入時窗為準</span></h3>
-        <canvas id="anim" height="420"></canvas>
+        <div class="animWrap"><canvas id="anim" height="420"></canvas></div>
       </div>
     </div>
   </section>
 </main>
-<footer class="muted small">build __BUILD_TIME__ · 內嵌 glpk.js 5.0.0（GPL-3.0，© jvail，https://github.com/jvail/glpk.js；build 僅將 ES module export 改寫為全域變數）· 自有程式碼 MIT · 離線可用、零外部請求</footer>
+<footer class="muted small">
+  <div>build __BUILD_TIME__ · 離線可用、零外部請求 · 自有程式碼 MIT · 內嵌 glpk.js 5.0.0（GPL-3.0）</div>
+  <details id="license" style="margin-top:8px">
+    <summary>授權與第三方聲明（glpk.js 5.0.0，GPL-3.0）</summary>
+    <div style="margin-top:8px;line-height:1.6">
+      <p>本檔內嵌 <b>glpk.js 5.0.0</b>（Copyright © Jan Vaillant，<a href="https://github.com/jvail/glpk.js" target="_blank" rel="noopener">https://github.com/jvail/glpk.js</a>），為 GNU GLPK 的 WebAssembly 移植，授權 <b>GPL-3.0</b>。因此整份 <code>dist/index.html</code> 受 GPL-3.0 約束，不是純 MIT。</p>
+      <p>內嵌檔：<code>vendor/glpk/glpk-5.0.0.js</code>，SHA-256 <code>__GLPK_SHA256__</code>（build 時驗證）。建置轉換：僅將檔尾 <code>export{pe as default};</code> 改寫為 <code>window.GLPK=pe;</code>，未修改其他內容；原始檔與 LICENSE 可於專案倉庫 <code>vendor/glpk/</code> 取得，或自上述上游來源取得相同版本。</p>
+      <p>本專案自有程式碼（<code>src/</code>、<code>build.js</code>、文件）：MIT。</p>
+      <details><summary>GNU General Public License v3.0 全文</summary><pre style="white-space:pre-wrap;font-size:11px;max-height:320px;overflow:auto;border:1px solid var(--line);padding:8px;border-radius:6px"><!-- @inline:license --></pre></details>
+    </div>
+  </details>
+</footer>
 
 <!-- @inline:glpk -->
 <!-- @inline:default.json -->

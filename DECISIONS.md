@@ -154,3 +154,14 @@
 | A1 band/color 重畫、無效 H 停用拖曳 | 留 S4 | Codex 建議項 |
 | A2 大量衛星的畫布容量 | 留 S4（可捲動／縮放） | Codex 建議項 |
 
+## 2026-10-18 S4 實作
+| 項目 | 決定 | 原因 |
+|---|---|---|
+| 兩種 JSON | 資料 JSON（原有）＋工作區 JSON（= localStorage 結構，含 format 標記）；匯入自動判別；啟動還原與匯入共用 `restoreWorkspace()` | §6「JSON 匯入／匯出同一結構」 |
+| 排程匯出 | 排程分頁新增「排程 CSV」「排程 JSON」，取選中解槽；JSON 含 score/feasible/violations/data | §6 匯出清單 |
+| 授權區 | 頁尾 details：版本、© Jan Vaillant、來源、SHA-256、轉換說明、GPL-3.0 全文（build 內嵌 `vendor/glpk/LICENSE`）；dist 由 374 → 416 KB | GPL 隨單檔散布須附授權全文 |
+| build 自檢 | `tests/build.test.js` 納入 `npm test`：build 成功、零外部資源標記、無 importScripts、授權文字、JSON 轉義、README 授權區分 | S4 驗收「授權文字齊備」可機器檢查 |
+| 離線驗收 | `tests/browser.s4.js`（Playwright offline context）產生 `tests/out/acceptance-s4.json` → 整理成 `docs/ACCEPTANCE_S4.md`；含 smoke z=3、(5,11)、GA 啟動／取消、九種匯出下載、工作區 round trip、主題、localStorage 全拋錯情境 | S4 驗收項目 |
+| A1 收尾 | band／color 重畫；H 無效 → 提示＋停用拖曳（顯示用目前版本 H） | Codex S3-r2 建議 |
+| A2 收尾 | `anim.fitSize`：gap < 8px 時畫布放大為正方形（需求邊長 2·(12+8n+24)），容器可捲動；小實例不變 | Codex S3-r2 建議 |
+

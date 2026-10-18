@@ -93,6 +93,16 @@
     norm.satellites.forEach((s, i) => orbitR.set(s.id, Re + gap * (i + 1)));
     return { cx, cy, Re, gap, orbitR };
   }
+  // 畫布容量（S4 A2）：給定可用寬高，回傳能容納全部軌道（gap ≥ 8px、Re ≥ 12、外圈留 24px）的正方形邊長；
+  // 不超過可用尺寸時回傳 {w,h} 原值；超過時回傳較大的 side（呼叫端把畫布放進可捲動容器）。
+  const MIN_GAP = 8, MIN_RE = 12, MARGIN = 24;
+  function fitSize(norm, w, h) {
+    const n = Math.max(1, norm.satellites.length);
+    const need = 2 * (MIN_RE + MIN_GAP * n + MARGIN);
+    const minDim = Math.min(w, h);
+    if (need <= minDim) return { w, h, scroll: false, need };
+    return { w: Math.max(w, need), h: Math.max(h, need), scroll: true, need };
+  }
   const polar = (cx, cy, r, deg) => { const a = (deg - 90) * Math.PI / 180; return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) }; };
 
   // 繪製一幀。theme: { bg, panel, text, muted, line, accent, calib }；satColor(id)
@@ -181,5 +191,5 @@
     return st;
   }
 
-  SGS.anim = { norm360, circDiff, stationAngles, fitPhase, fitAll, satAngle, contactState, layout, polar, drawFrame };
+  SGS.anim = { norm360, circDiff, stationAngles, fitPhase, fitAll, satAngle, contactState, layout, fitSize, polar, drawFrame };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

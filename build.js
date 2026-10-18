@@ -47,6 +47,12 @@ const parts = {
   'ga.js':        () => js('ga.js'),
   'anim.js':      () => js('anim.js'),
   'ui.js':        () => js('ui.js'),
+  // S4：GPL-3.0 全文（HTML 轉義後放入 <pre>）；授權檔必須存在且含 GPL 標題
+  'license':      () => {
+    const lic = read(path.join(ROOT, 'vendor', 'glpk', 'LICENSE'));
+    if (!/GNU GENERAL PUBLIC LICENSE/.test(lic) || !/Version 3/.test(lic)) fail('vendor/glpk/LICENSE 不是 GPL-3.0 全文');
+    return lic.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  },
 };
 let html = read(path.join(SRC, 'index.html'));
 const seen = {};
@@ -59,6 +65,11 @@ html = html.replace(/<!--\s*@inline:([\w.]+)\s*-->/g, (m, name) => {
 Object.keys(parts).forEach((name) => { if (!seen[name]) fail('inline 標記缺少：' + name); });
 if (/<!--\s*@inline:/.test(html)) fail('仍有未替換的 inline 標記');
 html = html.replace('__BUILD_TIME__', new Date().toISOString());
+if (!html.includes('__GLPK_SHA256__')) fail('index.html 缺少 __GLPK_SHA256__ 佔位（授權區）');
+html = html.replace('__GLPK_SHA256__', GLPK_SHA256);
+// S4 自檢：單檔不得有外部 script/link/img 來源
+const ext = html.match(/<(script|link|img|iframe)[^>]+(src|href)\s*=\s*["'](https?:)?\/\//gi);
+if (ext) fail('dist 含外部資源標記：' + ext.slice(0, 3).join(' | '));
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, html);
