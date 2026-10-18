@@ -223,6 +223,10 @@
       if (saved.format !== WS_TAG) errors.push({ path: 'workspace.format', msg: `不支援的 format：${E.fmt(saved.format)}（需為 ${WS_TAG}）` });
       if (!(Number.isInteger(saved.version) && saved.version >= 1 && saved.version <= WS_VERSION)) errors.push({ path: 'workspace.version', msg: `不支援的 version：${E.fmt(saved.version)}（支援 1..${WS_VERSION}）` });
     }
+    else {   // C2：無標記相容路徑的判別條件也在共用程序內驗證（boot 與匯入一致）
+      if (!hasOwn(saved, 'data') || !hasOwn(saved, 'slots')) errors.push({ path: 'workspace', msg: '無標記工作區必須同時有 data 與 slots' });
+      if (hasOwn(saved, 'requests')) errors.push({ path: 'workspace.requests', msg: '無標記工作區不得含 requests 欄位（看起來像資料 JSON）' });
+    }
     if (!hasOwn(saved, 'data')) errors.push({ path: 'workspace.data', msg: '工作區缺少 data' });
     else { const v = E.validateData(saved.data); if (!v.ok) v.errors.forEach((e) => errors.push({ path: 'workspace.data.' + e.path, msg: e.msg })); }
     if (hasOwn(saved, 'slots') && saved.slots != null && !isPlainObj(saved.slots)) errors.push({ path: 'workspace.slots', msg: 'slots 必須為物件' });

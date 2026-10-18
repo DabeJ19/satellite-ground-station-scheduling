@@ -232,6 +232,11 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
       const b = await bootWith({ format: 'sgs-workspace', version: 1, data: Object.assign(JSON.parse(JSON.stringify(D)), { meta: Object.assign({}, D.meta, { name: 'bad settings' }) }), revision: 7, slots: {}, settings: { ga: 'oops' } });
       assert.deepStrictEqual([b.rev, b.pageErrors], [1, []], JSON.stringify(b)); assert.notStrictEqual(b.name, 'bad settings'); assert.ok(b.errShown && /無法還原/.test(b.err));
       assert.deepStrictEqual([b.ui.popSize, b.ui.seed, b.ui.lambda], [50, 42, null]);
+      // C2：無標記但含自有 requests 的輸入 → boot 載入預設並提示（與匯入拒絕一致）；刪掉 requests 後可還原
+      const d2 = await bootWith({ data: D, slots: {}, requests: null, revision: 9 });
+      assert.deepStrictEqual([d2.rev, d2.pageErrors], [1, []], JSON.stringify(d2)); assert.ok(d2.errShown && /無法還原/.test(d2.err) && /requests/.test(d2.err));
+      const d3 = await bootWith({ data: D, slots: {}, revision: 9 });
+      assert.deepStrictEqual([d3.rev, d3.pageErrors], [9, []], JSON.stringify(d3));
       const c = await bootWith({ format: 'sgs-workspace', version: 1, data: D, revision: 3, slots: {}, settings: { tmlim: 30, ga: {} } });
       assert.deepStrictEqual([c.rev, c.ui.popSize, c.ui.seed, c.ui.lambda, c.ui.runs, c.pageErrors], [3, 50, 42, null, 20, []], JSON.stringify(c));
       await page.evaluate(() => { try { localStorage.clear(); } catch (_) {} }); await page.reload(); await page.waitForFunction(() => document.getElementById('glpkStatus').textContent.includes('就緒'), null, { timeout: 20000 });

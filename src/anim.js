@@ -71,7 +71,8 @@
     const visible = [];
     norm.visibilityMerged.forEach((w) => { if (t >= w.start && t < w.end) visible.push({ sat: w.sat, station: w.station }); });
     const active = [], calibrating = [];
-    (schedule || []).forEach((it) => {
+    (Array.isArray(schedule) ? schedule : []).forEach((it) => {
+      if (!it || typeof it !== 'object' || Array.isArray(it)) return;   // C3：null／非物件／陣列元素一律跳過
       const r = norm.reqById.get(it.req), a = norm.antById.get(it.antenna);
       if (!r || !a || !Number.isInteger(it.start)) return;
       const end = it.start + r.durMin;

@@ -77,10 +77,13 @@ test('(5,11) schedule: t=22 → SAT_C visible at GS_2, R6 active on GS_2-X, GS_1
   st = A.contactState(norm, s, 39.5);
   assert.deepStrictEqual([st.active.length, st.calibrating.length], [0, 0]);   // R5 end 29 + 10 = 39
 });
-test('contactState ignores malformed items', () => {
+test('contactState ignores malformed items (unknown req, non-integer start, null, number, array, non-array schedule)', () => {
   const norm = E.normalize(DEFAULT);
   const st = A.contactState(norm, [{ req: 'nope', antenna: 'GS_1-S', start: 0 }, { req: 'R1', antenna: 'GS_1-S', start: 'x' }], 1);
   assert.deepStrictEqual([st.active.length, st.calibrating.length], [0, 0]);
+  const st2 = A.contactState(norm, [null, 7, [], { req: 'R1', antenna: 'GS_1-S', start: 0 }], 1);   // C3：只由合法項貢獻
+  assert.deepStrictEqual(st2.active.map((a) => a.req), ['R1']);
+  assert.deepStrictEqual(A.contactState(norm, null, 1).active, []);
 });
 
 section('phase fit — multi-basin tie-breaking (S3-r2 B3)');
