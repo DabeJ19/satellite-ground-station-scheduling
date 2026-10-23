@@ -115,12 +115,8 @@
     $('#btnExport').onclick = () => download('sgs-data.json', JSON.stringify(state.draft, null, 2), 'application/json');
     $('#btnExportWs').onclick = () => download('sgs-workspace.json', JSON.stringify(exportWorkspace(), null, 2), 'application/json');
     $('#btnImport').onclick = () => $('#fileImport').click();
-    $('#fileImport').onchange = (e) => {
-      const f = e.target.files[0]; if (!f) return;
-      const fr = new FileReader();
-      fr.onload = () => importJSONText(fr.result);
-      fr.readAsText(f); e.target.value = '';
-    };
+    $('#fileImport').onchange = (e) => { importFile(e.target.files[0]); e.target.value = ''; };
+    initDropImport();
     $('#btnRevert').onclick = () => { state.draft = clone(state.data); renderDataTab(); showErrors(null); };
     $('#btnGenerate').onclick = () => {
       const o = {};
@@ -146,6 +142,38 @@
   }
 
   // 匯入：parse → validate 在區域變數完成；失敗保留原 draft／committed／解槽，不渲染輸入內容
+  // ---------- 檔案匯入（按鈕選檔與拖放共用）----------
+  function importFile(f) {
+    if (!f) return { ok: false };
+    const name = String(f.name || '');
+    const looksJson = /\.json$/i.test(name) || /json/i.test(f.type || '');
+    if (!looksJson) { showErrors([{ path: 'file', msg: `只接受 .json 檔：${name || '(未命名)'}` }]); return { ok: false }; }
+    if (f.size > 20 * 1024 * 1024) { showErrors([{ path: 'file', msg: `檔案過大（${(f.size / 1048576).toFixed(1)} MB，上限 20 MB）：${name}` }]); return { ok: false }; }
+    const fr = new FileReader();
+    fr.onload = () => importJSONText(fr.result);
+    fr.onerror = () => showErrors([{ path: 'file', msg: '讀取檔案失敗：' + name }]);
+    fr.readAsText(f);
+    return { ok: true, pending: true };
+  }
+  // 拖放匯入：把 .json 檔拖到頁面任何位置（資料分頁顯示提示框）；一次只取第一個檔；非檔案拖曳（文字、頁內拖曳）不處理
+  function initDropImport() {
+    const zone = $('#dropZone');
+    let depth = 0;
+    const hasFiles = (e) => !!(e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files'));
+    const show = (on) => { if (zone) zone.classList.toggle('hidden', !on); document.body.classList.toggle('dropping', on); };
+    window.addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; e.preventDefault(); depth++; show(true); });
+    window.addEventListener('dragover', (e) => { if (!hasFiles(e)) return; e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; });
+    window.addEventListener('dragleave', (e) => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (depth === 0) show(false); });
+    window.addEventListener('drop', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault(); depth = 0; show(false);
+      const files = Array.from(e.dataTransfer.files || []);
+      if (!files.length) return;
+      showTab('data');
+      if (files.length > 1) showErrors([{ path: 'file', msg: `一次只匯入一個檔，已取第一個：${files[0].name}` }]);
+      importFile(files[0]);
+    });
+  }
   function importJSONText(text) {
     let obj;
     try { obj = JSON.parse(text); } catch (err) { showErrors([{ path: 'file', msg: 'JSON 解析失敗：' + err.message }]); return { ok: false }; }
@@ -1106,7 +1134,7 @@ self.onmessage = function (e) {
     _setWorkerFactory: (fn) => { workerFactory = fn; },
     setTime, startPlay, pausePlay, setManualTask, ensureManual, manualBase, viewNorm, isViewStale, cancelDrag, drawAnim, getFit,
     getDraft: () => state.draft,
-    exportWorkspace, importWorkspace, restoreWorkspace, isWorkspace, sanitizeSettings, buildSlotFromSaved, defaultSettings, fullGaParams, exportSchedule, saveLS,
+    exportWorkspace, importWorkspace, restoreWorkspace, isWorkspace, importFile, sanitizeSettings, buildSlotFromSaved, defaultSettings, fullGaParams, exportSchedule, saveLS,
     _setGLPKFactory: (fn) => { destroyGLPK(); glpkFactory = fn; },
     _glpkDebug: () => ({ inst: glpkInst, pending: !!glpkPromise, gen: glpkGen }),
     _warmGLPK: () => initGLPK(),   // 模擬 boot 的閒置初始化（測試用）

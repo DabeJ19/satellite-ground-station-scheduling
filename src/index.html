@@ -22,12 +22,13 @@
 </header>
 
 <main>
+<div id="dropZone" class="dropzone hidden"><div class="inner">放開以匯入 JSON<br><span class="small">資料 JSON 或工作區 JSON；一次一個檔</span></div></div>
 <div id="storageWarn" class="errors hidden">瀏覽器儲存不可用（localStorage 失敗）：本次操作只保存在記憶體，關閉頁面即遺失。請用「匯出 JSON」備份資料。</div>
   <!-- ===== 資料 ===== -->
   <section class="tab" id="tab-data">
     <div class="toolbar">
       <button id="btnLoadDefault">載入 PPT 預設資料</button>
-      <button id="btnImport" title="接受資料 JSON 或工作區 JSON">匯入 JSON</button>
+      <button id="btnImport" title="接受資料 JSON 或工作區 JSON；也可直接把 .json 檔拖進頁面">匯入 JSON</button>
       <input type="file" id="fileImport" accept="application/json" hidden>
       <button id="btnExport" title="目前編輯中的資料（含未套用變更）">匯出資料 JSON</button>
       <button id="btnExportWs" title="資料 + 參數 + 三解槽（與瀏覽器儲存同一結構）">匯出工作區 JSON</button>

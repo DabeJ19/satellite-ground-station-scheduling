@@ -1,11 +1,11 @@
 {
-  "date": "2026-10-18T10:26:53.620Z",
+  "date": "2026-10-23T09:58:24.402Z",
   "url": "file:///home/claude/satellite-ground-station-scheduling/dist/index.html",
   "offline": true,
-  "sourceCommit": "083c6cb67ae2255b1e51a6eec9679a9c72d9ca20",
-  "distSha256": "675c2bda036a971e7a99ddd401e15dab28d5a5e31e755af5a45b10f726596d9f",
-  "distBytes": 431869,
-  "os": "linux 6.18.44-fc-v139 (x64)",
+  "sourceCommit": "a3eae8a5756aa6da667983c29daf302fdd4b2dff",
+  "distSha256": "0389ddf3ee147ea05cdad992af95b0f6ed79431c52d00b63931d833d70e4cb9c",
+  "distBytes": 434588,
+  "os": "linux 6.18.44-fc-v153 (x64)",
   "node": "v22.22.0",
   "channel": "playwright-chromium",
   "steps": [
@@ -393,6 +393,44 @@
       }
     },
     {
+      "name": "M1 drag-and-drop import: dragenter shows the drop zone; dropping a data JSON commits a new revision; workspace JSON restores slots; non-json rejected; multiple files → first used; text drags ignored",
+      "ok": true,
+      "info": {
+        "zoneShownOnEnter": true,
+        "dragoverPrevented": true,
+        "zoneHiddenAfterDrop": true,
+        "afterData": {
+          "rev": 3,
+          "name": "dropped",
+          "dur": 7,
+          "tab": true
+        },
+        "afterWs": {
+          "rev": 3,
+          "wsRev": 3,
+          "milpZ": 5,
+          "name": "dropped"
+        },
+        "txt": {
+          "same": true,
+          "err": "資料驗證失敗，未建立新版本：file — 只接受 .json 檔：notes.txt",
+          "shown": true
+        },
+        "multi": {
+          "name": "first-of-two"
+        },
+        "textDrag": {
+          "prevented": false,
+          "zoneHidden": true,
+          "revUnchanged": true
+        },
+        "bad": {
+          "same": true,
+          "err": "資料驗證失敗，未建立新版本：file — JSON 解析失敗：Expected property name or '}' in JSON at position 1 (line 1 column 2)"
+        }
+      }
+    },
+    {
       "name": "theme toggle: switches data-theme and persists across reload (storage available)",
       "ok": true,
       "info": {
@@ -471,7 +509,7 @@
     "name": "chromium",
     "version": "141.0.7390.37"
   },
-  "passed": 15,
+  "passed": 16,
   "errors": [],
   "external": []
 }

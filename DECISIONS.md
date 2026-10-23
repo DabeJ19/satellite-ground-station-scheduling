@@ -181,3 +181,11 @@
 | C3 contactState 防護 | 排程遍歷開頭跳過 null／非物件／陣列；非陣列 schedule 視為空 | Codex 建議，收尾落實；anim 單元測試直接覆蓋 |
 | 專案狀態 | S0–S4 全部通過；交付物 `dist/index.html`（驗收紀錄 `docs/ACCEPTANCE_S4.md`） | — |
 
+## 2026-10-23 維護 M1：拖放匯入 JSON
+| 項目 | 決定 | 原因 |
+|---|---|---|
+| 拖放範圍 | 整個頁面（window 監聽 dragenter/dragover/drop），僅當 dataTransfer.types 含 Files；落下後自動切到資料分頁 | 使用者不必先切到資料分頁 |
+| 檔案規則 | 一次取第一個檔（多檔提示）；副檔名 .json 或 MIME 含 json；上限 20 MB；資料／工作區 JSON 自動判別（沿用 importJSONText） | 與按鈕匯入一致 |
+| 提示框 | `#dropZone` 固定全頁半透明層、pointer-events:none | 不攔截底層 drop 事件 |
+| 測試 | browser.s4 新增 M1 步（DataTransfer 模擬：資料 JSON、工作區 JSON、.txt 拒絕、多檔取首、純文字拖曳不攔截、壞 JSON） | — |
+

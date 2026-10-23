@@ -17,6 +17,7 @@ npm run test:browser  # Playwright + Chromium：S1–S4 瀏覽器驗收（file:/
 雙擊 `dist/index.html` 即可使用（不需伺服器、可斷網、零外部請求）。
 
 - 分頁：資料（表格編輯、時窗時間軸拖曳、seeded 產生器、JSON 匯入匯出）→ 模型（MILP，已證明最佳／時間上限內最佳可行＋上界）→ GA 實驗（參數、單次曲線、多次統計、CSV）→ 排程與動畫（三解槽、甘特圖拖曳、播放、匯出）。
+- 匯入：「匯入 JSON」按鈕或直接把 `.json` 檔拖進頁面（資料 JSON 或工作區 JSON 自動判別）。
 - 匯出：資料 JSON、工作區 JSON（資料＋參數＋三解槽，可匯回）、排程 CSV/JSON、甘特圖 PNG、動畫幀 PNG、GA 曲線／統計／排程 CSV。
 - 瀏覽器儲存失敗（私密模式、配額）時降級為記憶體狀態並提示匯出 JSON 備份，所有操作仍可用。
 - 離線驗收紀錄：[docs/ACCEPTANCE_S4.md](docs/ACCEPTANCE_S4.md)。

@@ -242,6 +242,61 @@ const WAITFOR = `window.__waitFor = (f, label, timeoutMs) => new Promise((res, r
       await page.evaluate(() => { try { localStorage.clear(); } catch (_) {} }); await page.reload(); await page.waitForFunction(() => document.getElementById('glpkStatus').textContent.includes('就緒'), null, { timeout: 20000 });
       return { a, b, c };
     });
+    await step('M1 drag-and-drop import: dragenter shows the drop zone; dropping a data JSON commits a new revision; workspace JSON restores slots; non-json rejected; multiple files → first used; text drags ignored', async () => {
+      const r = await page.evaluate(async () => {
+        const mk = (name, text, type) => { const dt = new DataTransfer(); dt.items.add(new File([text], name, { type: type || 'application/json' })); return dt; };
+        const fire = (type, dt, target) => { const ev = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }); (target || document.body).dispatchEvent(ev); return ev; };
+        const zone = document.getElementById('dropZone');
+        const waitRev = async (rev) => { await window.__waitFor(() => SGS.app.state.revision === rev, 'rev ' + rev, 3000); };
+        const out = {};
+        SGS.app.loadData(window.SGS_DEFAULT_DATA); SGS.app.showTab('sched');
+        const rev0 = SGS.app.state.revision;
+        // 1) 資料 JSON：R1.durMin=7
+        const d = JSON.parse(JSON.stringify(window.SGS_DEFAULT_DATA)); d.requests[0].durMin = 7; d.meta.name = 'dropped';
+        const dt1 = mk('data.json', JSON.stringify(d));
+        fire('dragenter', dt1); out.zoneShownOnEnter = !zone.classList.contains('hidden');
+        const ov = fire('dragover', dt1); out.dragoverPrevented = ov.defaultPrevented;
+        fire('drop', dt1, document.getElementById('anim'));
+        out.zoneHiddenAfterDrop = zone.classList.contains('hidden');
+        await waitRev(rev0 + 1);
+        out.afterData = { rev: SGS.app.state.revision, name: SGS.app.state.data.meta.name, dur: SGS.app.state.data.requests[0].durMin, tab: !document.getElementById('tab-data').classList.contains('hidden') };
+        // 2) 工作區 JSON：含 milp 槽
+        await SGS.app.solveMILP(); const ws = SGS.app.exportWorkspace(); SGS.app.loadData(window.SGS_DEFAULT_DATA); SGS.app.state.slots.milp = null;
+        const revW = SGS.app.state.revision;
+        fire('drop', mk('ws.json', JSON.stringify(ws)));
+        await window.__waitFor(() => SGS.app.state.slots.milp && SGS.app.state.data.requests[0].durMin === 7, 'ws restored', 3000);
+        out.afterWs = { rev: SGS.app.state.revision, wsRev: ws.revision, milpZ: SGS.app.state.slots.milp.score.assigned, name: SGS.app.state.data.meta.name };
+        // 3) 非 json → 拒絕、狀態不變
+        const snap = JSON.stringify([SGS.app.state.revision, SGS.app.state.data]);
+        fire('drop', mk('notes.txt', 'hello', 'text/plain'));
+        await new Promise((r) => setTimeout(r, 150));
+        out.txt = { same: snap === JSON.stringify([SGS.app.state.revision, SGS.app.state.data]), err: document.getElementById('dataErrors').textContent, shown: !document.getElementById('dataErrors').classList.contains('hidden') };
+        // 4) 多檔 → 取第一個（有效）並提示
+        const d2 = JSON.parse(JSON.stringify(window.SGS_DEFAULT_DATA)); d2.meta.name = 'first-of-two';
+        const dtM = new DataTransfer(); dtM.items.add(new File([JSON.stringify(d2)], 'a.json', { type: 'application/json' })); dtM.items.add(new File(['{}'], 'b.json', { type: 'application/json' }));
+        const revM = SGS.app.state.revision; fire('drop', dtM); await waitRev(revM + 1);
+        out.multi = { name: SGS.app.state.data.meta.name };
+        // 5) 純文字拖曳（無 Files type）→ 不攔截、不顯示提示框
+        const dtT = new DataTransfer(); dtT.setData('text/plain', JSON.stringify(d));
+        const en = fire('dragenter', dtT); out.textDrag = { prevented: en.defaultPrevented, zoneHidden: zone.classList.contains('hidden') };
+        fire('drop', dtT); await new Promise((r) => setTimeout(r, 100)); out.textDrag.revUnchanged = SGS.app.state.revision === revM + 1;
+        // 6) 壞 JSON 內容 → 顯示解析錯誤、狀態不變
+        const snap2 = JSON.stringify([SGS.app.state.revision, SGS.app.state.data]);
+        fire('drop', mk('bad.json', '{not json')); await new Promise((r) => setTimeout(r, 150));
+        out.bad = { same: snap2 === JSON.stringify([SGS.app.state.revision, SGS.app.state.data]), err: document.getElementById('dataErrors').textContent };
+        return out;
+      });
+      assert.ok(r.zoneShownOnEnter && r.dragoverPrevented && r.zoneHiddenAfterDrop, JSON.stringify(r));
+      assert.deepStrictEqual([r.afterData.name, r.afterData.dur, r.afterData.tab], ['dropped', 7, true], JSON.stringify(r.afterData));
+      assert.deepStrictEqual([r.afterWs.rev, r.afterWs.milpZ, r.afterWs.name], [r.afterWs.wsRev, 5, 'dropped'], JSON.stringify(r.afterWs));
+      assert.ok(r.txt.same && r.txt.shown && /\.json/.test(r.txt.err), JSON.stringify(r.txt));
+      assert.strictEqual(r.multi.name, 'first-of-two');
+      assert.ok(!r.textDrag.prevented && r.textDrag.zoneHidden && r.textDrag.revUnchanged, JSON.stringify(r.textDrag));
+      assert.ok(r.bad.same && /JSON 解析失敗/.test(r.bad.err), JSON.stringify(r.bad));
+      assert.deepStrictEqual(errs, []);
+      await page.evaluate(() => { SGS.app.loadData(window.SGS_DEFAULT_DATA); });
+      return r;
+    });
     await step('theme toggle: switches data-theme and persists across reload (storage available)', async () => {
       const r = await page.evaluate(() => { const el = document.documentElement; const t0 = el.dataset.theme || 'dark'; document.getElementById('themeToggle').click(); return { t0, t1: el.dataset.theme }; });
       assert.notStrictEqual(r.t0, r.t1);

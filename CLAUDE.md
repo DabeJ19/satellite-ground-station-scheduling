@@ -10,6 +10,7 @@
 
 ## 目前狀態（更新於每次送審）
 - S0–S4 全部通過（S4 r2 通過，2026-10-18）。收尾：Codex 建議 C2／C3 已落實。**專案已交付**：`dist/index.html` ＋ `docs/ACCEPTANCE_S4.md`。
+- 維護 M1（2026-10-23）：拖放匯入 JSON，已實作＋測試，`docs/REVIEW_PROMPT_M1.md` 可交 Codex 審查（選擇性）。
 - 後續若有維護：照同一流程（實作 → 測試全綠 → REVIEW_REQUEST/PROMPT → Codex 審查）。
 
 ## 指令
